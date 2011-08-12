@@ -15,42 +15,51 @@ import cgitb
 cgitb.enable()
 #####################
 
+
 class DBObject(object):
     pass
+
 
 class User(DBObject):
     pass
 
+
 class Device(DBObject):
     pass
+
 
 class Platform(DBObject):
     pass
 
+
 class Build(DBObject):
     pass
+
 
 class Carrier(DBObject):
     pass
 
+
 class Update(DBObject):
     pass
+
 
 class Test(DBObject):
     pass
 
+
 class Feedback(DBObject):
     pass
 
+
 def parse_and_execute(args, **kw):
-    print 'Content-Type: text/plain\n'
-    actions = {'register_user': register_user,
-               'verify_user': verify_user,
-               'register_device': register_device,
-               'submit_feedback': submit_feedback,
-               'submit_test_results': submit_test_results,
-               'notify_of_update': notify_of_update,
-               'renew_auth_token': renew_auth_token}
+    actions = {'registerUser': register_user,
+               'verifyUser': verify_user,
+               'registerDevice': register_device,
+               'submitFeedback': submit_feedback,
+               'submitTestResults': submit_test_results,
+               'notifyOfUpdate': notify_of_update,
+               'renewAuthToken': renew_auth_token}
     if 'action' not in args:
         error('You must specify an action')
     elif args.getvalue('action') not in actions:
@@ -60,10 +69,19 @@ def parse_and_execute(args, **kw):
 
 
 def error(*args):
+    print 'Content-Type: text/plain\n'
     print json.dumps({'success': False, 'errors': args})
 
+
 def success(vals={}):
+    print 'Content-Type: text/plain\n'
     print json.dumps(dict(vals.items() + {'success': True}.items()))
+
+
+def html(content):
+    print 'Content-Type: text/html\n'
+    print content
+
 
 def register_user(form, conn, curs, *args, **kw):
     errors = []
