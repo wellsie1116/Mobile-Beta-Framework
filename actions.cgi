@@ -20,6 +20,14 @@ class DBObject(object):
     conn = None
     curs = None
 
+    def get_id(self):
+        return self._id
+
+    def set_id(self, new_id):
+        self._id = new_id
+
+    db_id = property(get_id, set_id)
+
 class User(DBObject):
 
     @classmethod
@@ -37,17 +45,6 @@ class User(DBObject):
         self.curs.execute("""SELECT * FROM users WHERE email = %s""",
                           (email,))
         return self._from_db_row(self.curs.fetchone())
-
-    def __init__(self, **kw):
-        pass
-
-    def get_id(self):
-        return self._id
-
-    def set_id(self, new_id):
-        self._id = new_id
-
-    db_id = property(get_id, set_id)
 
     def get_name(self):
         return self._name
@@ -111,14 +108,6 @@ class Device(DBObject):
     def from_id(self, db_id):
         self.curs.execute("""SELECT * FROM devices WHERE id = %s""",
                           (db_id,))
-
-    def get_id(self):
-        return self._id
-
-    def set_id(self, new_id):
-        self._id = new_id
-
-    db_id = property(get_id, set_id)
 
     def get_unique_identifier(self):
         return self._unique_identifier
@@ -205,42 +194,252 @@ class Device(DBObject):
 
 
 class Platform(DBObject):
-    pass
+    
+    @classmethod
+    def _from_db_row(self, row):
+        return None
+
+    @classmethod
+    def from_id(self, db_id):
+        return None
+
+    def get_name(self):
+        return self._name
+
+    def set_name(self, name):
+        self._name = name
+
+    name = property(get_name, set_name)
+
+    def save(self):
+        pass
 
 
 class Build(DBObject):
-    pass
+    
+    @classmethod
+    def _from_db_row(self, row):
+        return None
 
+    @classmethod
+    def from_id(self, db_id):
+        return None
+
+    def get_platform(self):
+        return self._platform
+
+    def set_platform(self, platform):
+        self._platform = platform
+
+    platform = property(get_platform, set_platform)
+
+    def get_number(self):
+        return self._number
+
+    def set_number(self, number):
+        self._number = number
+
+    number = property(get_number, set_number)
+
+    def get_published(self):
+        return self._published
+
+    def set_published(self, published):
+        self._published = published
+
+    published = property(get_published, set_published)
+
+    def get_official(self):
+        return self._official
+
+    def set_official(self, official):
+        self._official = official
+
+    official = property(get_official, set_official)
+
+    def save(self):
+        pass
 
 class Carrier(DBObject):
-    pass
+    
+    @classmethod
+    def _from_db_row(self, row):
+        return None
+
+    @classmethod
+    def from_id(self, db_id):
+        return None
+
+    def get_name(self):
+        return self._name
+
+    def set_name(self, name):
+        self._name = name
+
+    name = property(get_name, set_name)
+
+    def save(self):
+        pass
 
 
 class Update(DBObject):
-    pass
+    
+    @classmethod
+    def _from_db_row(self, row):
+        return None
+
+    @classmethod
+    def from_id(self, db_id):
+        return None
+
+    def get_device(self):
+        return self._device
+
+    def set_device(self, device):
+        self._device = device
+
+    device = property(get_device, set_device)
+
+    def get_from_build(self):
+        return self._from_build
+
+    def set_from_build(self, build):
+        self._from_build = build
+
+    from_build = property(get_from_build, set_from_build)
+
+    def get_to_build(self):
+        return self._to_build
+
+    def set_to_build(self, build):
+        self._to_build = build
+
+    to_build = property(get_to_build, set_to_build)
+
+    def get_time(self):
+        return self._time
+
+    def set_time(self, time):
+        self._time = time
+
+    time = property(get_time, set_time)
+
+    def save(self):
+        pass
 
 
 class Test(DBObject):
-    pass
+    # device, build, time, content, pass
+    @classmethod
+    def _from_db_row(self, row):
+        return None
+    
+    @classmethod
+    def from_id(self, db_id):
+        return None
 
+    def get_device(self):
+        return self._device
+
+    def set_device(self, device):
+        self._device = device
+
+    device = property(get_device, set_device)
+
+    def get_build(self):
+        return self._build
+
+    def set_build(self, build):
+        self._build = build
+
+    build = property(get_build, set_build)
+
+    def get_time(self):
+        return self._time
+
+    def set_time(self, time):
+        self._time = time
+
+    time = property(get_time, set_time)
+
+    def get_content(self):
+        return self._content
+
+    def set_content(self, content):
+        self._content = content
+
+    content = property(get_content, set_content)
+    
+    def get_pass(self):
+        return self._pass
+
+    def set_pass(self, passed):
+        self._pass = passed
+
+    passed = property(get_pass, set_pass)
+
+    def save(self):
+        pass
 
 class Feedback(DBObject):
-    pass
+
+    @classmethod
+    def _from_db_row(self, row):
+        return None
+    
+    @classmethod
+    def from_id(self, db_id):
+        return None
+
+    def get_device(self):
+        return self._device
+
+    def set_device(self, device):
+        self._device = device
+
+    device = property(get_device, set_device)
+
+    def get_build(self):
+        return self._build
+
+    def set_build(self, build):
+        self._build = build
+
+    build = property(get_build, set_build)
+
+    def get_time(self):
+        return self._time
+
+    def set_time(self, time):
+        self._time = time
+
+    time = property(get_time, set_time)
+
+    def get_content(self):
+        return self._content
+
+    def set_content(self, content):
+        self._content = content
+
+    content = property(get_content, set_content)
+    
+    def save(self):
+        pass
 
 
-def parse_and_execute(args, **kw):
+def parse_and_execute(form, **kw):
     actions = {'register': register,
                'verifyUser': verify_user,
                'submitFeedback': submit_feedback,
                'submitTestResults': submit_test_results,
                'notifyOfUpdate': notify_of_update,
                'renewAuthToken': renew_auth_token}
-    if 'action' not in args:
+    if 'action' not in form:
         error('You must specify an action')
-    elif args.getvalue('action') not in actions:
-        error('Invalid action: %s' % args.getvalue('action'))
+    elif form.getvalue('action') not in actions:
+        error('Invalid action: %s' % form.getvalue('action'))
     else:
-        actions[args.getvalue('action')](args, **kw)
+        actions[form.getvalue('action')](form=form, **kw)
 
 
 def error(*args):
@@ -258,7 +457,7 @@ def html(content):
     print content
 
 
-def register(form, conn, curs, *args, **kw):
+def register(form, *args, **kw):
     #error('Register not implemented')
     error(str(User.from_email('theisje@rose-hulman.edu')))
 
@@ -293,8 +492,7 @@ def run_script():
                            db='beta_testers')
     DBObject.conn = conn
     DBObject.curs = conn.cursor()
-    db = {'conn': conn, 'curs':conn.cursor()}
-    parse_and_execute(cgi.FieldStorage(), **db)
+    parse_and_execute(form=cgi.FieldStorage())
     conn.close()
 
 if __name__ == '__main__': run_script()
