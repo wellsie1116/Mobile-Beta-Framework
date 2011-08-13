@@ -1,10 +1,12 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
 """
 actions.cgi: interactions for the RHIT Mobile beta program
 """
 
+import datetime
 import cgi
+import hashlib
 import json
 import uuid
 
@@ -32,7 +34,17 @@ class User(DBObject):
 
     @classmethod
     def _from_db_row(self, row):
-        return None
+        if row is None:
+            return None
+        user = User()
+        user.db_id = row[0]
+        user.name = row[1]
+        user.email = row[2]
+        user.created = row[3]
+        user.verified = row[4]
+        user.verification_code = row[5]
+        user.name_change_code = row[6]
+        return user
 
     @classmethod
     def from_id(self, db_id):
@@ -45,6 +57,27 @@ class User(DBObject):
         self.curs.execute("""SELECT * FROM users WHERE email = %s""",
                           (email,))
         return self._from_db_row(self.curs.fetchone())
+
+    def __init__(self, new=False):
+        if new:
+            self.db_id = -1
+            self.name = None
+            self.email = None
+            self.created = datetime.datetime.now()
+            self.verified = False
+            self.verification_code = str(uuid.uuid4())
+            self.name_change_code = str(uuid.uuid4())
+        else:
+            self.db_id = -1
+            self.name = None
+            self.email = None
+            self.created = None
+            self.verified = False
+            self.verification_code = None
+            self.name_change_code = None
+
+    def __str__(self):
+        return 'User #%s: %s (%s)' % (self.db_id, self.email, self.name)
 
     def get_name(self):
         return self._name
@@ -79,23 +112,64 @@ class User(DBObject):
     verified = property(get_verified, set_verified)
 
     def get_verification_code(self):
-        return self._verification_code
+        return self._clear_verification_code
 
     def set_verification_code(self, verification_code):
-        self._verification_code = verification_code
+        if verification_code is None or verification_code.find('::') != -1:
+            self._verification_code = verification_code
+            self._clear_verification_code = None
+        else:
+            self._clear_verification_code = verification_code
+            self._verification_code = hashify(verification_code)
+
+    def is_correct_verification_code(self, verification_code):
+        if self._verification_code is not None:
+            return verify_hash(self._verification_code, verification_code)
+        else:
+            return False
 
     verification_code = property(get_verification_code, set_verification_code)
 
     def get_name_change_code(self):
-        return self._name_change_code
+        return self._clear_name_change_code
 
     def set_name_change_code(self, name_change_code):
-        self._name_change_code = name_change_code
+        if name_change_code is None or name_change_code.find('::') != -1:
+            self._name_change_code = name_change_code
+            self._clear_name_change_code = None
+        else:
+            self._clear_name_change_code = name_change_code
+            self.name_change_code = hashify(name_change_code)
+
+    def is_correct_name_change_code(self, name_change_code):
+        if self._name_change_code is not None:
+            return verify_hash(self._name_change_code, name_change_coe)
+        else:
+            return False
 
     name_change_code = property(get_name_change_code, set_name_change_code)
 
     def save(self):
-        pass
+        if self.db_id == -1:
+            self.curs.execute("""INSERT INTO users (name, email, created, verified,
+                                                    verification_code,
+                                                    name_change_code)
+                                     VALUES(%s, %s, %s, %s, %s, %s)""",
+                               (self.name, self.email, self.created, self.verified,
+                                self._verification_code, self._name_change_code))
+            self.conn.commit()
+            self.db_id = User.from_email(self.email).db_id
+        else:
+            self.curs.execute("""UPDATE users
+                                 SET name = %s, email = %s, 
+                                     created = %s, verified = %s,
+                                     verification_code = %s,
+                                     name_change_code = %s
+                                 WHERE id = %s""", (self.name, self.email,
+                                                    self.created, self.verified,
+                                                    self._verification_code,
+                                                    self._name_change_code,
+                                                    self.db_id))
 
 
 class Device(DBObject):
@@ -329,7 +403,7 @@ class Update(DBObject):
 
 
 class Test(DBObject):
-    # device, build, time, content, pass
+    
     @classmethod
     def _from_db_row(self, row):
         return None
@@ -427,6 +501,21 @@ class Feedback(DBObject):
         pass
 
 
+def hashify(string):
+    salt = str(uuid.uuid4())
+    salted = '%s::%s' % (salt, string)
+    hashed = hashlib.sha1(salted).hexdigest()
+    return '%s::%s' % (salt, hashed)
+
+    
+def verify_hash(entry, string):
+    split = entry.partition('::')
+    salt = split[0]
+    answer = split[2]
+    salted = '%s::%s' % (salt, string)
+    return answer == hashlib.sha1(salted).hexdigest()
+
+
 def parse_and_execute(form, **kw):
     actions = {'register': register,
                'verifyUser': verify_user,
@@ -458,15 +547,36 @@ def html(content):
 
 
 def register(form, *args, **kw):
-    #error('Register not implemented')
-    error(str(User.from_email('theisje@rose-hulman.edu')))
+    errors = []
+    if 'email' not in form:
+        errors.append('Email address is required')
+    if 'deviceIdentifier' not in form:
+        errors.append('Device identifier is required')
+    if len(errors) > 0:
+        error(*errors)
+    else:
+        results = {}
+        email = form.getvalue('email')
+        device_id = form.getvalue('deviceIdentifier')
+        user = User.from_email(email)
+        if user is None:
+            results['newUser'] = True
+            user = User(new=True)
+            user.email = email
+            user.save()
+            success(results)
+        else:
+            results['newUser'] = False
+            success(results)
 
 
 def verify_user(form, *args, **kw):
-    if 'verification_code' not in form:
-        error('Verification code required')
-    else:
-        error('Verify User not implemented')
+    errors = []
+    if 'verificationCode' not in form:
+        errors.append('Verification code is required')
+    if 'email' not in form:
+        errors.append('Email address is required')
+
 
 
 def submit_feedback(*args, **kw):
