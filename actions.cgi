@@ -184,6 +184,34 @@ class Device(DBObject):
     def from_id(self, db_id):
         self.curs.execute("""SELECT * FROM devices WHERE id = %s""",
                           (db_id,))
+    @classmethod
+    def from_user(self, user):
+        self.curs.execute("""SELECT * FROM devices WHERE user = %s""", (user.db_id,))
+        return [self._from_db_row(row) for row in self.curs.fetchall()]
+
+    def __init__(self, new=False):
+        if new:
+            self.unique_identifier = None
+            self.os_info = None
+            self.model = None
+            self.verified = False
+            self.verification_code = str(uuid.uuid4())
+            self.auth_token = str(uuid.uuid4())
+            self.user = None
+            self.carrier = None
+            self.current_build = None
+            self.platform = None
+        else:
+            self.unique_identifier = None
+            self.os_info = None
+            self.model = None
+            self.verified = False
+            self.verification_code = None
+            self.auth_token = None
+            self.user = None
+            self.carrier = None
+            self.current_build = None
+            self.platform = None
 
     def get_unique_identifier(self):
         return self._unique_identifier
