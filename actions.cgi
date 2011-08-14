@@ -60,6 +60,17 @@ class User(DBObject):
                           (email,))
         return self._from_db_row(self.curs.fetchone())
 
+    @classmethod
+    def from_verification_code(self, code):
+        summed = sum_string(code)
+        self.curs.execute("""SELECT * FROM users
+                             WHERE verification_code LIKE %s""",
+                          (str(summed) + '::%',))
+        candidates = [self._from_db_row(row) for row in self.curs.fetchall()]
+        match = filter(lambda d: d.is_correct_verification_code(code), candidates)
+        return None if len(match) < 1 else match[0]
+
+
     def __init__(self, new=False):
         if new:
             self.db_id = -1
@@ -69,6 +80,7 @@ class User(DBObject):
             self.verified = False
             self.verification_code = str(uuid.uuid4())
             self.name_change_code = str(uuid.uuid4())
+            self.devices = None
         else:
             self.db_id = -1
             self.name = None
@@ -77,6 +89,7 @@ class User(DBObject):
             self.verified = False
             self.verification_code = None
             self.name_change_code = None
+            self.devices = None
 
     def __str__(self):
         return 'User #%s: %s (%s)' % (self.db_id, self.email, self.name)
@@ -122,11 +135,11 @@ class User(DBObject):
             self._clear_verification_code = None
         else:
             self._clear_verification_code = verification_code
-            self._verification_code = hashify(verification_code)
+            self._verification_code = hashify(verification_code, lookup=True)
 
     def is_correct_verification_code(self, verification_code):
         if self._verification_code is not None:
-            return verify_hash(self._verification_code, verification_code)
+            return verify_hash(self._verification_code, verification_code, lookup=True)
         else:
             return False
 
@@ -141,15 +154,26 @@ class User(DBObject):
             self._clear_name_change_code = None
         else:
             self._clear_name_change_code = name_change_code
-            self._name_change_code = hashify(name_change_code)
+            self._name_change_code = hashify(name_change_code, lookup=True)
 
     def is_correct_name_change_code(self, name_change_code):
         if self._name_change_code is not None:
-            return verify_hash(self._name_change_code, name_change_code)
+            return verify_hash(self._name_change_code, name_change_code, lookup=True)
         else:
             return False
 
     name_change_code = property(get_name_change_code, set_name_change_code)
+
+    def get_devices(self):
+        if self._devices is None:
+            self.curs.execute("""SELECT * FROM devices WHERE user = %s""", (self.db_id,))
+            self._devices = [Device._from_db_row(r) for r in self.curs.fetchall()]
+        return self._devices
+
+    def set_devices(self, devices):
+        self._devices = devices
+
+    devices = property(get_devices, set_devices)
 
     def save(self):
         if self.db_id == -1:
@@ -211,6 +235,18 @@ class Device(DBObject):
         match = filter(lambda d: d.is_correct_unique_identifier(unique_id), 
                        candidates)
         return None if len(match) < 1 else match[0]
+
+
+    @classmethod
+    def from_verification_code(self, code):
+        summed = sum_string(code)
+        self.curs.execute("""SELECT * FROM devices WHERE verification_code LIKE %s""",
+                          (str(summed) + '::%',))
+        candidates = [self._from_db_row(row) for row in self.curs.fetchall()]
+        match = filter(lambda d: d.is_correct_verification_code(code), 
+                       candidates)
+        return None if len(match) < 1 else match[0]
+
 
     def __init__(self, new=False):
         if new:
@@ -291,11 +327,11 @@ class Device(DBObject):
             self._clear_verification_code = None
         else:
             self._clear_verification_code = verification_code
-            self._verification_code = hashify(verification_code)
+            self._verification_code = hashify(verification_code, lookup=True)
 
     def is_correct_verification_code(self, verification_code):
         if self._verification_code is not None:
-            return verify_hash(self._verification_code, verification_code)
+            return verify_hash(self._verification_code, verification_code, lookup=True)
         else:
             return False
 
@@ -504,6 +540,14 @@ class Build(DBObject):
         self._official = official
 
     official = property(get_official, set_official)
+
+    def get_url(self):
+        return self._url
+
+    def set_url(self, url):
+        self._url = url
+
+    url = property(get_url, set_url)
 
     def save(self):
         pass
@@ -730,10 +774,13 @@ def verify_hash(entry, string, lookup=False):
 def parse_and_execute(form, **kw):
     actions = {'register': register,
                'verifyUser': verify_user,
+               'verifyDevice': verify_device,
                'changeUserName': change_user_name,
                'submitFeedback': submit_feedback,
                'submitTestResults': submit_test_results,
-               'notifyOfUpdate': notify_of_update}
+               'notifyOfUpdate': notify_of_update,
+               'publishBuild': publish_build,
+               'renewPublishLink': renew_publish_link}
     if 'action' not in form:
         error('You must specify an action')
     elif form.getvalue('action') not in actions:
@@ -754,7 +801,7 @@ def success(vals={}):
 
 def html(content):
     print 'Content-Type: text/html\n'
-    print '<!DOCTYPE html><html><head></head><body>content</body></html>'
+    print '<!DOCTYPE html><html><head></head><body>%s</body></html>' % content
 
 
 def register(form, *args, **kw):
@@ -790,7 +837,6 @@ def register(form, *args, **kw):
         user.save()
         base_url = 'http://mobile.csse.rose-hulman.edu/beta/actions.cgi?'
         verify_args = {'action': 'verifyUser',
-                       'email': user.email,
                        'verificationCode': user.verification_code}
         name_change_args = {'action': 'changeUserName',
                             'email': user.email,
@@ -811,6 +857,10 @@ def register(form, *args, **kw):
         device.os_info = os_info
         device.model = model
         device.save()
+        base_url = 'http://mobile.csse.rose-hulman.edu/beta/actions.cgi?'
+        verify_args = {'action': 'verifyDevice',
+                       'verificationCode': device.verification_code}
+        results['deviceUrl'] = base_url + urllib.urlencode(verify_args)
         results['authToken'] = device.auth_token
     else:
         results['newDevice'] = False
@@ -830,23 +880,43 @@ def register(form, *args, **kw):
 def verify_user(form, *args, **kw):
     errors = []
     if 'verificationCode' not in form:
-        errors.append('Verification code is required')
-    if 'email' not in form:
-        errors.append('Email address is required')
-    if len(errors) > 0:
-        errors = ''.join(['<li>%s</li>' % item for item in errors])
-        html('<h1>Verification Failed</h1><ul>%s</ul>' % errors)
-        return
-    email = form.getvalue('email')
+        html('<h1>Verification Failed</h1>Verification code is required')
     ver_code = form.getvalue('verificationCode')
-    user = User.from_email(email)
-    if not user.is_correct_verification_code(ver_code):
-        html('<h1>Verification Failed</h1>Please contact a team member.')
+    user = User.from_verification_code(ver_code)
+    if user is None:
+        html('<h1>Verification Failed</h1>Invalid verification code')
+    elif user.verified:
+        html('<h1>Account already verified</h1>')
+    else:
+        user.verified = True
+        user.save()
+        devices = 'Devices also verified:<ul>'
+        for device in user.devices:
+            if not device.verified:
+                device.verified = True
+                devices += '<li>%s (%s)</li>' % (device.model, device.os_info)
+                device.save()
+        devices += '</ul>'
+        html('<h1>Account Verified</h1>' + devices)
+
+
+def verify_device(form, *args, **kw):
+    errors = []
+    if 'verificationCode' not in form:
+        html('<h1>Verification Failed</h1>Verification code is required')
         return
-    user.verified = True
-    user.verification_code = None
-    user.save()
-    html('<h1>Account Verified</h1>')
+    ver_code = form.getvalue('verificationCode')
+    device = Device.from_verification_code(ver_code)
+    if device is None:
+        html('<h1>Verification Failed</h1>Invalid verification code')
+        return
+    elif device.verified:
+        html('<h1>Device Already Verified</h1>')
+        return
+    else:
+        device.verified = True
+        device.save()
+        html('<h1>Device Verified</h1>')
 
 
 def change_user_name(form, *args, **kw):
@@ -897,6 +967,14 @@ def submit_test_results(*args, **kw):
 
 def notify_of_update(*args, **kw):
     error('Notify of Update not implemented')
+
+
+def publish_build(*args, **kw):
+    error('Publish Build not implemented')
+
+
+def renew_publish_link(*args, **kw):
+    error('Renew Publish Link not implemented')
 
 
 def run_script():
