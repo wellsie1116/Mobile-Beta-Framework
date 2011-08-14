@@ -8,6 +8,7 @@ import datetime
 import cgi
 import hashlib
 import json
+import types
 import urllib
 import uuid
 
@@ -178,7 +179,19 @@ class Device(DBObject):
     
     @classmethod
     def _from_db_row(self, row):
-        return None
+        device = Device()
+        device.db_id = row[0]
+        device.unique_identifier = row[1]
+        device.os_info = row[2]
+        device.model = row[3]
+        device.verified = row[4]
+        device.verification_code = row[5]
+        device.auth_token = row[6]
+        device.user = row[7]
+        device.carrier = row[8]
+        device.build = row[9]
+        device.platform = row[10]
+        return device
 
     @classmethod
     def from_id(self, db_id):
@@ -189,8 +202,19 @@ class Device(DBObject):
         self.curs.execute("""SELECT * FROM devices WHERE user = %s""", (user.db_id,))
         return [self._from_db_row(row) for row in self.curs.fetchall()]
 
+    @classmethod
+    def from_unique_identifier(self, unique_id):
+        summed = sum_string(unique_id)
+        self.curs.execute("""SELECT * FROM devices WHERE identifier LIKE %s""",
+                          (str(summed) + '::%',))
+        candidates = [self._from_db_row(row) for row in self.curs.fetchall()]
+        match = filter(lambda d: d.is_correct_unique_identifier(unique_id), 
+                       candidates)
+        return None if len(match) < 1 else match[0]
+
     def __init__(self, new=False):
         if new:
+            self.db_id = -1
             self.unique_identifier = None
             self.os_info = None
             self.model = None
@@ -202,6 +226,7 @@ class Device(DBObject):
             self.current_build = None
             self.platform = None
         else:
+            self.db_id = -1
             self.unique_identifier = None
             self.os_info = None
             self.model = None
@@ -214,10 +239,22 @@ class Device(DBObject):
             self.platform = None
 
     def get_unique_identifier(self):
-        return self._unique_identifier
+        return self._clear_unique_identifier
 
     def set_unique_identifier(self, unique_identifier):
-        self._unique_identifier = unique_identifier
+        if unique_identifier is None or unique_identifier.find('::') != -1:
+            self._unique_identifier = unique_identifier
+            self._clear_unique_identifier = None
+        else:
+            self._clear_unique_identifier = unique_identifier
+            self._unique_identifier = hashify(unique_identifier, lookup=True)
+
+    def is_correct_unique_identifier(self, unique_identifier):
+        if self._unique_identifier is not None:
+            return verify_hash(self._unique_identifier, unique_identifier,
+                               lookup=True)
+        else:
+            return False
 
     unique_identifier = property(get_unique_identifier, set_unique_identifier)
 
@@ -246,18 +283,40 @@ class Device(DBObject):
     verified = property(get_verified, set_verified)
 
     def get_verification_code(self):
-        return self._verification_code
+        return self._clear_verification_code
 
     def set_verification_code(self, verification_code):
-        self._verification_code = verification_code
+        if verification_code is None or verification_code.find('::') != -1:
+            self._verification_code = verification_code
+            self._clear_verification_code = None
+        else:
+            self._clear_verification_code = verification_code
+            self._verification_code = hashify(verification_code)
+
+    def is_correct_verification_code(self, verification_code):
+        if self._verification_code is not None:
+            return verify_hash(self._verification_code, verification_code)
+        else:
+            return False
 
     verification_code = property(get_verification_code, set_verification_code)
 
     def get_auth_token(self):
-        return self._auth_token
+        return self._clear_auth_token
 
     def set_auth_token(self, auth_token):
-        self._auth_token = auth_token
+        if auth_token is None or auth_token.find('::') != -1:
+            self._auth_token = auth_token
+            self._clear_auth_token = None
+        else:
+            self._clear_auth_token = auth_token
+            self._auth_token = hashify(auth_token, lookup=True)
+
+    def is_correct_auth_token(self, auth_token):
+        if self._auth_token is not None:
+            return verify_hash(self._auth_token, auth_token, lookup=True)
+        else:
+            return False
 
     auth_token = property(get_auth_token, set_auth_token)
 
@@ -265,7 +324,10 @@ class Device(DBObject):
         return self._user
 
     def set_user(self, user):
-        self._user = user
+        if type(user) == types.LongType:
+            self._user = User.from_id(user)
+        else:
+            self._user = user
 
     user = property(get_user, set_user)
 
@@ -294,11 +356,47 @@ class Device(DBObject):
     platform = property(get_platform, set_platform)
 
     def save(self):
-        pass
+        if self.db_id == -1:
+            self.curs.execute("""INSERT INTO devices (identifier, os_info,
+                                     model, verified, verification_code,
+                                     auth_token, user, carrier, build,
+                                     platform)
+                                 VALUES(%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                              (self._unique_identifier, self.os_info, self.model,
+                               self.verified, self._verification_code,
+                               self._auth_token, 
+                               self.user.db_id, 
+                               None if self.carrier is None else self.carrier.db_id,
+                               None if self.current_build is None else self.current_build.db_id,
+                               None if self.platform is None else self.platform.db_id))
+            self.conn.commit()
+            self.db_id = Device.from_unique_identifier(self.unique_identifier).db_id
+        else:
+            self.curs.execute("""UPDATE devices
+                                 SET identifier = %s,
+                                     os_info = %s,
+                                     model = %s,
+                                     verified = %s,
+                                     verification_code = %s,
+                                     auth_token = %s,
+                                     user = %s,
+                                     carrier = %s,
+                                     build = %s,
+                                     platform = %s
+                                  WHERE id = %s""",
+                              (self._unique_identifier,
+                               self.os_info, self.model, self.verified,
+                               self._verification_code, self._auth_token,
+                               self.user.db_id,
+                               None if self.carrier is None else self.carrier.db_id,
+                               None if self.build is None else self.build.db_id,
+                               None if self.platform is None else self.platform.db_id,
+                               self.db_id))
+            self.conn.commit()
 
 
 class Platform(DBObject):
-    
+
     @classmethod
     def _from_db_row(self, row):
         return None
@@ -363,6 +461,7 @@ class Build(DBObject):
 
     def save(self):
         pass
+
 
 class Carrier(DBObject):
     
@@ -531,14 +630,21 @@ class Feedback(DBObject):
         pass
 
 
-def hashify(string):
+def sum_string(string):
+    return reduce(lambda s, c: s + ord(c), string, 0) % 100000000
+
+
+def hashify(string, lookup=False):
+    summed = sum_string(string)
     salt = str(uuid.uuid4())
     salted = '%s::%s' % (salt, string)
     hashed = hashlib.sha1(salted).hexdigest()
-    return '%s::%s' % (salt, hashed)
+    return '%s::%s::%s' % (summed, salt, hashed)
 
     
-def verify_hash(entry, string):
+def verify_hash(entry, string, lookup=False):
+    if lookup:
+        entry = entry[entry.find('::') + 2:]
     split = entry.partition('::')
     salt = split[0]
     answer = split[2]
@@ -552,8 +658,7 @@ def parse_and_execute(form, **kw):
                'changeUserName': change_user_name,
                'submitFeedback': submit_feedback,
                'submitTestResults': submit_test_results,
-               'notifyOfUpdate': notify_of_update,
-               'renewAuthToken': renew_auth_token}
+               'notifyOfUpdate': notify_of_update}
     if 'action' not in form:
         error('You must specify an action')
     elif form.getvalue('action') not in actions:
@@ -574,7 +679,7 @@ def success(vals={}):
 
 def html(content):
     print 'Content-Type: text/html\n'
-    print content
+    print '<!DOCTYPE html><html><head></head><body>content</body></html>'
 
 
 def register(form, *args, **kw):
@@ -590,6 +695,7 @@ def register(form, *args, **kw):
     email = form.getvalue('email')
     device_id = form.getvalue('deviceIdentifier')
     user = User.from_email(email)
+    device = Device.from_unique_identifier(device_id)
     if user is None:
         results['newUser'] = True
         user = User(new=True)
@@ -606,12 +712,24 @@ def register(form, *args, **kw):
         name_change_url = base_url + urllib.urlencode(name_change_args)
         results['verifyUrl'] = verify_url
         results['nameChangeUrl'] = name_change_url
-        success(results)
-        return
     else:
         results['newUser'] = False
-        success(results)
-        return
+    if device is None:
+        results['newDevice'] = True
+        device = Device(new=True)
+        device.unique_identifier = device_id
+        device.user = user
+        device.save()
+        results['authToken'] = device.auth_token
+    else:
+        results['newDevice'] = False
+        if device.user.email != email:
+            error('Device already registered to another user')
+            return
+        device.auth_token = str(uuid.uuid4())
+        device.save()
+        results['authToken'] = device.auth_token
+    success(results)
 
 
 def verify_user(form, *args, **kw):
@@ -672,6 +790,7 @@ def change_user_name(form, *args, **kw):
         user.save()
         html('<h1>Name Changed Successfully</h1>')
         return
+
 
 def submit_feedback(*args, **kw):
     error('Submit Feedback not implemented')
