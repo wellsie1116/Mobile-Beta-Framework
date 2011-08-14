@@ -8,6 +8,7 @@ import datetime
 import cgi
 import hashlib
 import json
+import smtplib
 import types
 import urllib
 import uuid
@@ -68,6 +69,17 @@ class User(DBObject):
                           (str(summed) + '::%',))
         candidates = [self._from_db_row(row) for row in self.curs.fetchall()]
         match = filter(lambda d: d.is_correct_verification_code(code), candidates)
+        return None if len(match) < 1 else match[0]
+
+
+    @classmethod
+    def from_name_change_code(self, code):
+        summed = sum_string(code)
+        self.curs.execute("""SELECT * FROM users
+                             WHERE name_change_code LIKE %s""",
+                          (str(summed) + '::%',))
+        candidates = [self._from_db_row(row) for row in self.curs.fetchall()]
+        match = filter(lambda d: d.is_correct_name_change_code(code), candidates)
         return None if len(match) < 1 else match[0]
 
 
@@ -839,12 +851,18 @@ def register(form, *args, **kw):
         verify_args = {'action': 'verifyUser',
                        'verificationCode': user.verification_code}
         name_change_args = {'action': 'changeUserName',
-                            'email': user.email,
                             'nameChangeCode': user.name_change_code}
         verify_url = base_url + urllib.urlencode(verify_args)
         name_change_url = base_url + urllib.urlencode(name_change_args)
-        results['verifyUrl'] = verify_url
-        results['nameChangeUrl'] = name_change_url
+        msg = ('Thank you for registering for the RHIT Mobile Beta program! '
+                'Please verify your email and devices by clicking this link:'
+                '\n\n%s\n\nThanks!\nThe RHIT Mobile Team') % verify_url
+        send_email(email, platform.owner_email, 'Verify your email and devices', msg) 
+        name_msg = ('A new user has registered for your platform\'s beta '
+                    'program:\n\nName: %s\nEmail: %s\n\nTo change this user\'s '
+                    'name, use the following link:\n\n%s\n\nLet me know if '
+                    'something breaks\nJimmy') % (user.name, user.email, name_change_url)
+        send_email(platform.owner_email, 'theisje@rose-hulman.edu', 'New user %s registered' % user.email, name_msg)
     else:
         results['newUser'] = False
     if device is None:
@@ -857,10 +875,16 @@ def register(form, *args, **kw):
         device.os_info = os_info
         device.model = model
         device.save()
-        base_url = 'http://mobile.csse.rose-hulman.edu/beta/actions.cgi?'
-        verify_args = {'action': 'verifyDevice',
-                       'verificationCode': device.verification_code}
-        results['deviceUrl'] = base_url + urllib.urlencode(verify_args)
+        if not results['newUser']:
+            base_url = 'http://mobile.csse.rose-hulman.edu/beta/actions.cgi?'
+            verify_args = {'action': 'verifyDevice',
+                           'verificationCode': device.verification_code}
+            deviceUrl = base_url + urllib.urlencode(verify_args)
+            msg = ('Thank you for registering another device for the RHIT Mobile '
+                   'Beta Program! Please verify this new device by clicking the '
+                   'link below.\n\nDevice: %s (%s)\n\n%s\n\nThanks!\nThe '
+                   'RHIT Mobile Team') % (device.model, device.os_info, deviceUrl)
+            send_email(email, platform.owner_email, 'Verify your new device', msg)
         results['authToken'] = device.auth_token
     else:
         results['newDevice'] = False
@@ -921,29 +945,21 @@ def verify_device(form, *args, **kw):
 
 def change_user_name(form, *args, **kw):
     errors = []
-    if 'email' not in form:
-        errors.append('Email address required')
     if 'nameChangeCode' not in form:
-        errors.append('Name change code required')
-    if len(errors) > 0:
-        errors = ''.join(['<li>%s</li>' % item for item in errors])
-        html('<h1>Invalid Arguments</h1><ul>%s</ul>' % errors)
+        html('<h1>Name Change Failed</h1>Name change code required')
         return
-    email = form.getvalue('email')
     code = form.getvalue('nameChangeCode')
     name = form.getvalue('name')
-    user = User.from_email(email)
+    user = User.from_name_change_code(code)
     if user is None:
-        html('<h1>Name Change Failed</h1>')
+        html('<h1>Name Change Failed</h1>Invalid name change code')
         return
-    elif not user.is_correct_name_change_code(code):
-        html('<h1>Name Change Failed</h1>')
-        return
-    elif name is None:
+    email = user.email
+    if name is None:
         html("""<h1>Change User's Name</h1>
                 <form action="/beta/actions.cgi" method="post">
                 <label for="email">Email:</label><br/>
-                <input type="text" name="email" value="%s" readonly="readonly"/><br/>
+                <input type="text" name="email" value="%s" disabled="disabled"/><br/>
                 <label for="name">Name:</label><br/>
                 <input type="text" name="name" value="%s"/><br/>
                 <input type="hidden" name="nameChangeCode" value="%s"/>
@@ -955,6 +971,21 @@ def change_user_name(form, *args, **kw):
         user.save()
         html('<h1>Name Changed Successfully</h1>')
         return
+
+def send_email(to_addr, reply_addr, subject, msg):
+    username = 'rhitmobile@gmail.com'  
+    password = 'zu7hewuxan4phideemootaiphohSh4oe'  
+
+    msg = ('From: RHIT Mobile Beta <rhitmobile@gmail.com>\r\n'
+            'To: %s\r\n'
+            'Reply-To: %s\r\n'
+            'Subject: %s\r\n\r\n%s') % (to_addr, reply_addr, subject, msg)
+
+    server = smtplib.SMTP('smtp.gmail.com:587')  
+    server.starttls()  
+    server.login(username, password)  
+    server.sendmail('RHIT Mobile Beta Program', (to_addr,), msg)  
+    server.quit()  
 
 
 def submit_feedback(*args, **kw):
