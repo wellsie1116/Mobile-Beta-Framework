@@ -513,11 +513,32 @@ class Carrier(DBObject):
     
     @classmethod
     def _from_db_row(self, row):
-        return None
+        if row is None:
+            return None
+        carrier = Carrier()
+        carrier.db_id = row[0]
+        carrier.name = row[1]
+        carrier.identifier = row[2]
+        return carrier
 
     @classmethod
     def from_id(self, db_id):
-        return None
+        self.curs.execute("""SELECT * FROM carriers
+                             WHERE id = %s""", (db_id,))
+        return self._from_db_row(self.curs.fetchone())
+
+    @classmethod
+    def from_identifier(self, identifier):
+        if identifier is None:
+            return self.from_identifier('none')
+        self.curs.execute("""SELECT * FROM carriers
+                             WHERE identifier = %s""", (identifier,))
+        return self._from_db_row(self.curs.fetchone())
+
+    def __init__(self):
+        self.db_id = -1
+        self.name = None
+        self.identifier = None
 
     def get_name(self):
         return self._name
@@ -526,6 +547,14 @@ class Carrier(DBObject):
         self._name = name
 
     name = property(get_name, set_name)
+
+    def get_identifier(self):
+        return self._identifier
+
+    def set_identifier(self, identifier):
+        self._identifier = identifier
+
+    identifier = property(get_identifier, set_identifier)
 
     def save(self):
         pass
@@ -745,8 +774,14 @@ def register(form, *args, **kw):
     user = User.from_email(email)
     device = Device.from_unique_identifier(device_id)
     platform = Platform.from_identifier(form.getvalue('platform'))
+    carrier = Carrier.from_identifier(form.getvalue('carrier'))
+    os_info = form.getvalue('OSInfo')
+    model = form.getvalue('model')
     if platform is None:
         error('Invalid platform')
+        return
+    if carrier is None:
+        error('Invalid carrier')
         return
     if user is None:
         results['newUser'] = True
@@ -772,6 +807,9 @@ def register(form, *args, **kw):
         device.unique_identifier = device_id
         device.user = user
         device.platform = platform
+        device.carrier = carrier
+        device.os_info = os_info
+        device.model = model
         device.save()
         results['authToken'] = device.auth_token
     else:
@@ -781,6 +819,9 @@ def register(form, *args, **kw):
             return
         device.auth_token = str(uuid.uuid4())
         device.platform = platform
+        device.carrier = carrier
+        device.os_info = os_info
+        device.model = model
         device.save()
         results['authToken'] = device.auth_token
     success(results)
