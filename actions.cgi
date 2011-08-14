@@ -335,7 +335,10 @@ class Device(DBObject):
         return self._carrier
 
     def set_carrier(self, carrier):
-        self._carrier = carrier
+        if type(carrier) == types.LongType:
+            self._carrier = Carrier.from_id(carrier)
+        else:
+            self._carrier = carrier
 
     carrier = property(get_carrier, set_carrier)
 
@@ -343,7 +346,10 @@ class Device(DBObject):
         return self._current_build
 
     def set_current_build(self, build):
-        self._current_build = build
+        if type(build) == types.LongType:
+            self._current_build = Build.from_id(build)
+        else:
+            self._current_build = build
 
     current_build = property(get_current_build, set_current_build)
 
@@ -351,7 +357,10 @@ class Device(DBObject):
         return self._platform
 
     def set_platform(self, platform):
-        self._platform = platform
+        if type(platform) == types.LongType:
+            self._platform = Platform.from_id(platform)
+        else:
+            self._platform = platform
 
     platform = property(get_platform, set_platform)
 
@@ -399,12 +408,33 @@ class Platform(DBObject):
 
     @classmethod
     def _from_db_row(self, row):
-        return None
+        if row is None:
+            return None
+        platform = Platform()
+        platform.db_id = row[0]
+        platform.name = row[1]
+        platform.identifier = row[2]
+        platform.owner_email = row[3]
+        return platform
 
     @classmethod
     def from_id(self, db_id):
-        return None
+        self.curs.execute("""SELECT * FROM platforms
+                             WHERE id = %s""" % db_id)
+        return self._from_db_row(self.curs.fetchone())
 
+    @classmethod
+    def from_identifier(self, identifier):
+        self.curs.execute("""SELECT * FROM platforms
+                             WHERE identifier = %s""", (identifier,))
+        return self._from_db_row(self.curs.fetchone())
+
+    def __init__(self, new=False):
+        self.db_id = -1
+        self.name = None
+        self.identifier = None
+        self.owner_email = None
+ 
     def get_name(self):
         return self._name
 
@@ -412,6 +442,22 @@ class Platform(DBObject):
         self._name = name
 
     name = property(get_name, set_name)
+
+    def get_identifier(self):
+        return self._identifier
+
+    def set_identifier(self, identifier):
+        self._identifier = identifier
+
+    identifier = property(get_identifier, set_identifier)
+
+    def get_owner_email(self):
+        return self._owner_email
+
+    def set_owner_email(self, email):
+        self._owner_email = email
+
+    owner_email = property(get_owner_email, set_owner_email)
 
     def save(self):
         pass
@@ -688,6 +734,8 @@ def register(form, *args, **kw):
         errors.append('Email address is required')
     if 'deviceIdentifier' not in form:
         errors.append('Device identifier is required')
+    if 'platform' not in form:
+        errors.append('Platform is required')
     if len(errors) > 0:
         error(*errors)
         return
@@ -696,6 +744,10 @@ def register(form, *args, **kw):
     device_id = form.getvalue('deviceIdentifier')
     user = User.from_email(email)
     device = Device.from_unique_identifier(device_id)
+    platform = Platform.from_identifier(form.getvalue('platform'))
+    if platform is None:
+        error('Invalid platform')
+        return
     if user is None:
         results['newUser'] = True
         user = User(new=True)
@@ -719,6 +771,7 @@ def register(form, *args, **kw):
         device = Device(new=True)
         device.unique_identifier = device_id
         device.user = user
+        device.platform = platform
         device.save()
         results['authToken'] = device.auth_token
     else:
@@ -727,6 +780,7 @@ def register(form, *args, **kw):
             error('Device already registered to another user')
             return
         device.auth_token = str(uuid.uuid4())
+        device.platform = platform
         device.save()
         results['authToken'] = device.auth_token
     success(results)
@@ -802,10 +856,6 @@ def submit_test_results(*args, **kw):
 
 def notify_of_update(*args, **kw):
     error('Notify of Update not implemented')
-
-
-def renew_auth_token(*args, **kw):
-    error('Renew Auth Token not implemented')
 
 
 def run_script():
