@@ -463,6 +463,7 @@ class Platform(DBObject):
         platform.name = row[1]
         platform.identifier = row[2]
         platform.owner_email = row[3]
+        platform.publish_key = row[4]
         return platform
 
     @classmethod
@@ -477,11 +478,21 @@ class Platform(DBObject):
                              WHERE identifier = %s""", (identifier,))
         return self._from_db_row(self.curs.fetchone())
 
+    @classmethod
+    def from_publish_key(self, key):
+        summed = sum_string(key)
+        self.curs.execute("""SELECT * FROM platforms WHERE publish_key LIKE %s""",
+                          (str(summed) + '::%',))
+        candidates = [self._from_db_row(row) for row in self.curs.fetchall()]
+        match = filter(lambda d: d.is_correct_publish_key(key), candidates)
+        return None if len(match) < 1 else match[0]
+
     def __init__(self, new=False):
         self.db_id = -1
         self.name = None
         self.identifier = None
         self.owner_email = None
+        self.publish_key = None
  
     def get_name(self):
         return self._name
@@ -507,8 +518,35 @@ class Platform(DBObject):
 
     owner_email = property(get_owner_email, set_owner_email)
 
+    def get_publish_key(self):
+        return self._clear_publish_key
+
+    def set_publish_key(self, key):
+        if key is None or key.find('::') != -1:
+            self._publish_key = key
+            self._clear_publish_key = None
+        else:
+            self._clear_publish_key = key
+            self._publish_key = hashify(key, lookup=True)
+
+    publish_key = property(get_publish_key, set_publish_key)
+
+    def is_correct_publish_key(self, key):
+        if self._publish_key is not None:
+            return verify_hash(self._publish_key, key, lookup=True)
+        else:
+            return False
+
     def save(self):
-        pass
+        self.curs.execute("""UPDATE platforms
+                             SET name = %s,
+                                 identifier = %s,
+                                 owner_email = %s,
+                                 publish_key = %s
+                             WHERE id = %s""", (self.name, self.identifier,
+                                                self.owner_email,
+                                                self._publish_key, self.db_id))
+        self.conn.commit()
 
 
 class Build(DBObject):
@@ -824,11 +862,14 @@ def register(form, *args, **kw):
         errors.append('Device identifier is required')
     if 'platform' not in form:
         errors.append('Platform is required')
+    if 'buildNumber' not in form:
+        errors.append('Build number is required')
     if len(errors) > 0:
         error(*errors)
         return
     results = {}
     email = form.getvalue('email')
+    name = form.getvalue('name')
     device_id = form.getvalue('deviceIdentifier')
     user = User.from_email(email)
     device = Device.from_unique_identifier(device_id)
@@ -836,6 +877,7 @@ def register(form, *args, **kw):
     carrier = Carrier.from_identifier(form.getvalue('carrier'))
     os_info = form.getvalue('OSInfo')
     model = form.getvalue('model')
+    build_number = form.getvalue('buildNumber')
     if platform is None:
         error('Invalid platform')
         return
@@ -846,6 +888,7 @@ def register(form, *args, **kw):
         results['newUser'] = True
         user = User(new=True)
         user.email = email
+        user.name = name
         user.save()
         base_url = 'http://mobile.csse.rose-hulman.edu/beta/actions.cgi?'
         verify_args = {'action': 'verifyUser',
@@ -1004,8 +1047,26 @@ def publish_build(*args, **kw):
     error('Publish Build not implemented')
 
 
-def renew_publish_link(*args, **kw):
-    error('Renew Publish Link not implemented')
+def renew_publish_link(form, *args, **kw):
+    if 'platform' not in form:
+        html('<h1>Renewal Failed</h1>Platform required')
+        return
+    platform = Platform.from_identifier(form.getvalue('platform'))
+    if platform is None:
+        html('<h1>Renewal Failed</h1>Invalid platform')
+        return
+    platform.publish_key = str(uuid.uuid4())
+    platform.save()
+    base_url = 'http://mobile.csse.rose-hulman.edu/beta/actions.cgi?'
+    publish_args = {'action': 'publishBuild',
+                    'publishKey': platform.publish_key}
+    publish_url = base_url + urllib.urlencode(publish_args)
+    msg = ('The publishing key for %s has been renewed. Use the link below to '
+           'publish builds for %s from now on.\n\nPublishing Key: %s\n\n%s\n\n'
+           'Thanks\nJimmy') % (platform.name, platform.name, platform.publish_key,
+                               publish_url)
+    send_email(platform.owner_email, 'theisje@rose-hulman.edu', 'Publishing Key Renewed', msg)
+    html('<h1>Publishing Key Renewed</h1>')
 
 
 def run_script():
