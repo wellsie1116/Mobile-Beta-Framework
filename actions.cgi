@@ -553,17 +553,59 @@ class Build(DBObject):
     
     @classmethod
     def _from_db_row(self, row):
-        return None
+        if row is None:
+            return None
+        build = Build()
+        build.db_id = row[0]
+        build.platform = row[1]
+        build.number = row[2]
+        build.published = row[3]
+        build.official = row[4]
+        build.view_url = row[5]
+        build.download_url = row[6]
+        return build
 
     @classmethod
     def from_id(self, db_id):
-        return None
+        self.curs.execute("""SELECT * FROM builds WHERE id = %s""",
+                          (db_id,))
+        return self._from_db_row(self.curs.fetchone())
+
+    @classmethod
+    def from_build_number_and_platform(self, number, platform):
+        self.curs.execute("""SELECT * FROM builds
+                             WHERE platform = %s AND
+                                   build_number = %s
+                             ORDER BY published DESC""",
+                           (platform.db_id, number))
+        return self._from_db_row(self.curs.fetchone())
+
+    def __init__(self, new=False):
+        if new:
+            self.db_id = -1
+            self.platform = None
+            self.number = -1
+            self.published = datetime.datetime.now()
+            self.official = False
+            self.view_url = None
+            self.download_url = None
+        else:
+            self.db_id = -1
+            self.platform = None
+            self.number = -1
+            self.published = None
+            self.official = False
+            self.view_url = None
+            self.download_url = None
 
     def get_platform(self):
         return self._platform
 
     def set_platform(self, platform):
-        self._platform = platform
+        if type(platform) == types.LongType:
+            self._platform = Platform.from_id(platform)
+        else:
+            self._platform = platform
 
     platform = property(get_platform, set_platform)
 
@@ -591,16 +633,41 @@ class Build(DBObject):
 
     official = property(get_official, set_official)
 
-    def get_url(self):
-        return self._url
+    def get_view_url(self):
+        return self._view_url
 
-    def set_url(self, url):
-        self._url = url
+    def set_view_url(self, url):
+        self._view_url = url
 
-    url = property(get_url, set_url)
+    view_url = property(get_view_url, set_view_url)
+
+    def get_download_url(self):
+        return self._download_url
+
+    def set_download_url(self, url):
+        self._download_url = url
 
     def save(self):
-        pass
+        if self.db_id == -1:
+            self.curs.execute("""INSERT INTO builds
+                                 (platform, build_number, published,
+                                  official, view_url, download_url)
+                                 VALUES(%s, %s, %s, %s, %s, %s)""",
+                                 (self.platform.db_id, self.number,
+                                  self.published, self.official, self.view_url, self.download_url))
+            self.conn.commit()
+        else:
+            self.curs.execute("""UPDATE builds
+                                 SET platform = %s,
+                                     build_number = %s,
+                                     published = %s,
+                                     official = %s,
+                                     view_url = %s,
+                                     download_url = %s
+                                 WHERE id = %s""", (self.platform.db_id, self.number,
+                                                    self.published, self.view_url,
+                                                    self.download_url))
+            self.conn.commit()
 
 
 class Carrier(DBObject):
@@ -881,6 +948,10 @@ def register(form, *args, **kw):
     if platform is None:
         error('Invalid platform')
         return
+    build = Build.from_build_number_and_platform(build_number, platform)
+    if build is None:
+        error('Invalid build number')
+        return
     if carrier is None:
         error('Invalid carrier')
         return
@@ -917,6 +988,7 @@ def register(form, *args, **kw):
         device.carrier = carrier
         device.os_info = os_info
         device.model = model
+        device.build = build
         device.save()
         if not results['newUser']:
             base_url = 'http://mobile.csse.rose-hulman.edu/beta/actions.cgi?'
@@ -939,6 +1011,7 @@ def register(form, *args, **kw):
         device.carrier = carrier
         device.os_info = os_info
         device.model = model
+        device.build = build
         device.save()
         results['authToken'] = device.auth_token
     success(results)
@@ -1043,8 +1116,39 @@ def notify_of_update(*args, **kw):
     error('Notify of Update not implemented')
 
 
-def publish_build(*args, **kw):
-    error('Publish Build not implemented')
+def publish_build(form, *args, **kw):
+    if 'publishKey' not in form:
+        html('Publishing Key required')
+        return
+    publish_key = form.getvalue('publishKey')
+    platform = Platform.from_publish_key(publish_key)
+    if platform is None:
+        html('Bad publishing key')
+        return
+    if 'buildNumber' not in form:
+        html(('<h1>Publish New %s Build</h1>'
+              '<form action="/beta/actions.cgi" method="post">'
+              '<input type="hidden" name="publishKey" value="%s"/>'
+              '<input type="hidden" name="action" value="publishBuild"/>'
+              '<label for="buildNumber">Build Number</label><br/>'
+              '<input type="text" name="buildNumber"/><br/>'
+              '<input type="checkbox" name="official"/>'
+              '<label for="official">Official Build</label><br/>'
+              '<label for="viewURL">Viewing URL</label><br/>'
+              '<input type="text" name="viewURL"/><br/>'
+              '<label for="downloadURL">Download URL</label><br/>'
+              '<input type="text" name="downloadURL"/><br/>'
+              '<input type="submit"/></form>') % (platform.name, publish_key))
+        return
+    else:
+        build = Build(new=True)
+        build.platform = platform
+        build.number = form.getvalue('buildNumber')
+        build.official = form.getvalue('official') == 'on'
+        build.view_url = form.getvalue('viewURL')
+        build.download_url = form.getvalue('downloadURL')
+        build.save()
+        html('<h1>Build Published</h1>')
 
 
 def renew_publish_link(form, *args, **kw):
