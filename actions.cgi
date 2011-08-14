@@ -8,6 +8,7 @@ import datetime
 import cgi
 import hashlib
 import json
+import urllib
 import uuid
 
 import MySQLdb
@@ -139,11 +140,11 @@ class User(DBObject):
             self._clear_name_change_code = None
         else:
             self._clear_name_change_code = name_change_code
-            self.name_change_code = hashify(name_change_code)
+            self._name_change_code = hashify(name_change_code)
 
     def is_correct_name_change_code(self, name_change_code):
         if self._name_change_code is not None:
-            return verify_hash(self._name_change_code, name_change_coe)
+            return verify_hash(self._name_change_code, name_change_code)
         else:
             return False
 
@@ -170,6 +171,7 @@ class User(DBObject):
                                                     self._verification_code,
                                                     self._name_change_code,
                                                     self.db_id))
+            self.conn.commit()
 
 
 class Device(DBObject):
@@ -519,6 +521,7 @@ def verify_hash(entry, string):
 def parse_and_execute(form, **kw):
     actions = {'register': register,
                'verifyUser': verify_user,
+               'changeUserName': change_user_name,
                'submitFeedback': submit_feedback,
                'submitTestResults': submit_test_results,
                'notifyOfUpdate': notify_of_update,
@@ -554,20 +557,33 @@ def register(form, *args, **kw):
         errors.append('Device identifier is required')
     if len(errors) > 0:
         error(*errors)
+        return
+    results = {}
+    email = form.getvalue('email')
+    device_id = form.getvalue('deviceIdentifier')
+    user = User.from_email(email)
+    if user is None:
+        results['newUser'] = True
+        user = User(new=True)
+        user.email = email
+        user.save()
+        base_url = 'http://mobile.csse.rose-hulman.edu/beta/actions.cgi?'
+        verify_args = {'action': 'verifyUser',
+                       'email': user.email,
+                       'verificationCode': user.verification_code}
+        name_change_args = {'action': 'changeUserName',
+                            'email': user.email,
+                            'nameChangeCode': user.name_change_code}
+        verify_url = base_url + urllib.urlencode(verify_args)
+        name_change_url = base_url + urllib.urlencode(name_change_args)
+        results['verifyUrl'] = verify_url
+        results['nameChangeUrl'] = name_change_url
+        success(results)
+        return
     else:
-        results = {}
-        email = form.getvalue('email')
-        device_id = form.getvalue('deviceIdentifier')
-        user = User.from_email(email)
-        if user is None:
-            results['newUser'] = True
-            user = User(new=True)
-            user.email = email
-            user.save()
-            success(results)
-        else:
-            results['newUser'] = False
-            success(results)
+        results['newUser'] = False
+        success(results)
+        return
 
 
 def verify_user(form, *args, **kw):
@@ -576,8 +592,58 @@ def verify_user(form, *args, **kw):
         errors.append('Verification code is required')
     if 'email' not in form:
         errors.append('Email address is required')
+    if len(errors) > 0:
+        errors = ''.join(['<li>%s</li>' % item for item in errors])
+        html('<h1>Verification Failed</h1><ul>%s</ul>' % errors)
+        return
+    email = form.getvalue('email')
+    ver_code = form.getvalue('verificationCode')
+    user = User.from_email(email)
+    if not user.is_correct_verification_code(ver_code):
+        html('<h1>Verification Failed</h1>Please contact a team member.')
+        return
+    user.verified = True
+    user.verification_code = None
+    user.save()
+    html('<h1>Account Verified</h1>')
 
 
+def change_user_name(form, *args, **kw):
+    errors = []
+    if 'email' not in form:
+        errors.append('Email address required')
+    if 'nameChangeCode' not in form:
+        errors.append('Name change code required')
+    if len(errors) > 0:
+        errors = ''.join(['<li>%s</li>' % item for item in errors])
+        html('<h1>Invalid Arguments</h1><ul>%s</ul>' % errors)
+        return
+    email = form.getvalue('email')
+    code = form.getvalue('nameChangeCode')
+    name = form.getvalue('name')
+    user = User.from_email(email)
+    if user is None:
+        html('<h1>Name Change Failed</h1>')
+        return
+    elif not user.is_correct_name_change_code(code):
+        html('<h1>Name Change Failed</h1>')
+        return
+    elif name is None:
+        html("""<h1>Change User's Name</h1>
+                <form action="/beta/actions.cgi" method="post">
+                <label for="email">Email:</label><br/>
+                <input type="text" name="email" value="%s" readonly="readonly"/><br/>
+                <label for="name">Name:</label><br/>
+                <input type="text" name="name" value="%s"/><br/>
+                <input type="hidden" name="nameChangeCode" value="%s"/>
+                <input type="hidden" name="action" value="changeUserName"/>
+                <input type="submit"/></form>""" % (user.email, user.name if user.name is not None else '', code))
+        return
+    else:
+        user.name = name
+        user.save()
+        html('<h1>Name Changed Successfully</h1>')
+        return
 
 def submit_feedback(*args, **kw):
     error('Submit Feedback not implemented')
