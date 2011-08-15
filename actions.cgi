@@ -580,6 +580,22 @@ class Build(DBObject):
                            (platform.db_id, number))
         return self._from_db_row(self.curs.fetchone())
 
+    @classmethod
+    def latest(self, platform):
+        self.curs.execute("""SELECT * FROM builds
+                             WHERE platform = %s AND
+                                   official = 1
+                             ORDER BY published DESC""",
+                          (platform.db_id))
+        official = self._from_db_row(self.curs.fetchone())
+        self.curs.execute("""SELECT * FROM builds
+                             WHERE platform = %s AND
+                                   official = 0
+                              ORDER BY published DESC""",
+                           (platform.db_id))
+        latest = self._from_db_row(self.curs.fetchone())
+        return official, latest
+
     def __init__(self, new=False):
         if new:
             self.db_id = -1
@@ -896,6 +912,7 @@ def parse_and_execute(form, **kw):
                'submitFeedback': submit_feedback,
                'submitTestResults': submit_test_results,
                'notifyOfUpdate': notify_of_update,
+               'getLatestBuilds': get_latest_builds,
                'publishBuild': publish_build,
                'renewPublishLink': renew_publish_link}
     if 'action' not in form:
@@ -1116,6 +1133,31 @@ def notify_of_update(*args, **kw):
     error('Notify of Update not implemented')
 
 
+def get_latest_builds(form, *args, **kw):
+    if 'platform' not in form:
+        error('Platform is required')
+        return
+    platform = Platform.from_identifier(form.getvalue('platform'))
+    if platform is None:
+        error('Invalid platform')
+        return
+    latest, official = Build.latest(platform)
+    result = {}
+    if latest is None:
+        result['latest'] = None
+    else:
+        result['latest'] = {'buildNumber': latest.number,
+                            'viewURL': latest.view_url,
+                            'downloadURL': latest.download_url}
+    if official is None:
+        result['official'] = None
+    else:
+        result['official'] = {'buildNumber': official.number,
+                              'viewURL': official.view_url,
+                              'downloadURL': official.download_url}
+    success(result)
+
+
 def publish_build(form, *args, **kw):
     if 'publishKey' not in form:
         html('Publishing Key required')
@@ -1144,7 +1186,7 @@ def publish_build(form, *args, **kw):
         build = Build(new=True)
         build.platform = platform
         build.number = form.getvalue('buildNumber')
-        build.official = form.getvalue('official') == 'on'
+        build.official = form.getvalue('official') in ('on', 'true')
         build.view_url = form.getvalue('viewURL')
         build.download_url = form.getvalue('downloadURL')
         build.save()
