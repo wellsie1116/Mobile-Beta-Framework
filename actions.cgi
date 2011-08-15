@@ -813,17 +813,38 @@ class Test(DBObject):
     
     @classmethod
     def _from_db_row(self, row):
-        return None
+        if row is None:
+            return None
+        test = Test()
+        test.db_id = row[0]
+        test.device = row[1]
+        test.build = row[2]
+        test.time = row[3]
+        test.content = row[4]
+        test.passed = row[5]
+        return test
     
     @classmethod
     def from_id(self, db_id):
-        return None
+        self.curs.execute("""SELECT * FROM test_results WHERE id = %s""",
+                          (db_id,))
+        return self._from_db_row(self.curse.fetchone())
+
+    def __init__(self):
+        self.device = None
+        self.build = None
+        self.time = datetime.datetime.now()
+        self.content = None
+        self.passed = False
 
     def get_device(self):
         return self._device
 
     def set_device(self, device):
-        self._device = device
+        if type(device) == types.LongType:
+            self._device = Device.from_id(device)
+        else:
+            self._device = device
 
     device = property(get_device, set_device)
 
@@ -831,7 +852,10 @@ class Test(DBObject):
         return self._build
 
     def set_build(self, build):
-        self._build = build
+        if type(build) == types.LongType:
+            self._build = Build.from_id(build)
+        else:
+            self._build = build
 
     build = property(get_build, set_build)
 
@@ -860,7 +884,11 @@ class Test(DBObject):
     passed = property(get_pass, set_pass)
 
     def save(self):
-        pass
+        self.curs.execute("""INSERT INTO test_results (device, build, time,
+                                content, pass)
+                             VALUES (%s, %s, %s, %s, %s)""",
+                          (self.device.db_id, self.build.db_id, self.time, self.content, self.passed))
+        self.conn.commit()
 
 class Feedback(DBObject):
 
@@ -1165,7 +1193,10 @@ def send_email(to_addr, reply_addr, subject, msg):
     server = smtplib.SMTP('smtp.gmail.com:587')  
     server.starttls()  
     server.login(username, password)  
-    server.sendmail('RHIT Mobile Beta Program', (to_addr,), msg)  
+    try:
+        server.sendmail('RHIT Mobile Beta Program', (to_addr,), msg)  
+    except Exception:
+        pass # JUST EAT IT
     server.quit()  
 
 
@@ -1189,7 +1220,24 @@ def submit_feedback(form, *args, **kw):
 
 
 def submit_test_results(form, *args, **kw):
-    error('Submit Test Results not implemented')
+    if 'authToken' not in form:
+        error('Auth Token is required')
+        return
+    if 'passed' not in form:
+        error('Pass Status is required')
+        return
+    device = Device.from_auth_token(form.getvalue('authToken'))
+    if device is None:
+        error('Authentication failed')
+        return
+    passed = form.getvalue('passed').lower() == 'true'
+    test = Test()
+    test.device = device
+    test.build = device.current_build
+    test.content = form.getvalue('content')
+    test.passed = passed
+    test.save()
+    success()
 
 
 def notify_of_update(form, *args, **kw):
