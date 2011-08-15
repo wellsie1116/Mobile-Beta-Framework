@@ -767,17 +767,35 @@ class Update(DBObject):
     
     @classmethod
     def _from_db_row(self, row):
-        return None
+        if row is None:
+            return None
+        update = Update()
+        update.db_id = row[0]
+        update.device = row[1]
+        update.from_build = row[2]
+        update.to_build = row[3]
+        update.time = row[4]
 
     @classmethod
     def from_id(self, db_id):
-        return None
+        self.curs.execute("""SELECT * FROM updates WHERE id = %s""",
+                          (db_id,))
+        return self._from_db_row(self.curs.fetchone())
+
+    def __init__(self):
+        self.device = None
+        self.from_build = None
+        self.to_build = None
+        self.time = datetime.datetime.now()
 
     def get_device(self):
         return self._device
 
     def set_device(self, device):
-        self._device = device
+        if type(device) == types.LongType:
+            self._device = Device.from_id(device)
+        else:
+            self._device = device
 
     device = property(get_device, set_device)
 
@@ -785,7 +803,10 @@ class Update(DBObject):
         return self._from_build
 
     def set_from_build(self, build):
-        self._from_build = build
+        if type(build) == types.LongType:
+            self._from_build = Build.from_id(build)
+        else:
+            self._from_build = build
 
     from_build = property(get_from_build, set_from_build)
 
@@ -793,7 +814,10 @@ class Update(DBObject):
         return self._to_build
 
     def set_to_build(self, build):
-        self._to_build = build
+        if type(build) == types.LongType:
+            self._to_build = Build.from_id(build)
+        else:
+            self._to_build = build
 
     to_build = property(get_to_build, set_to_build)
 
@@ -806,7 +830,13 @@ class Update(DBObject):
     time = property(get_time, set_time)
 
     def save(self):
-        pass
+        self.curs.execute("""INSERT INTO updates (device, from_build, to_build, time)
+                             VALUES (%s, %s, %s, %s)""",
+                          (self.device.db_id,
+                           None if self.from_build is None else self.from_build.db_id,
+                           self.to_build.db_id,
+                           self.time))
+        self.conn.commit()
 
 
 class Test(DBObject):
@@ -1241,7 +1271,33 @@ def submit_test_results(form, *args, **kw):
 
 
 def notify_of_update(form, *args, **kw):
-    error('Notify of Update not implemented')
+    if 'authToken' not in form:
+        error('Auth Token is required')
+        return
+    if 'toBuildNumber' not in form:
+        error('Destination Build is required')
+        return
+    device = Device.from_auth_token(form.getvalue('authToken'))
+    if device is None:
+        error('Authentication failed')
+        return
+    to_build = Build.from_build_number_and_platform(form.getvalue('toBuildNumber'),
+                                                    device.platform)
+    if to_build is None:
+        error('Invalid destination build number')
+        return
+    from_build = device.current_build
+    if to_build.number == from_build.number:
+        error('Device is already running this build number')
+        return
+    update = Update()
+    update.device = device
+    update.to_build = to_build
+    update.from_build = from_build
+    device.current_build = to_build
+    update.save()
+    device.save()
+    success()
 
 
 def get_latest_builds(form, *args, **kw):
