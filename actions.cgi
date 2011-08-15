@@ -225,7 +225,7 @@ class Device(DBObject):
         device.auth_token = row[6]
         device.user = row[7]
         device.carrier = row[8]
-        device.build = row[9]
+        device.current_build = row[9]
         device.platform = row[10]
         return device
 
@@ -433,8 +433,8 @@ class Device(DBObject):
                                self._auth_token, 
                                self.user.db_id, 
                                None if self.carrier is None else self.carrier.db_id,
-                               None if self.current_build is None else self.current_build.db_id,
-                               None if self.platform is None else self.platform.db_id))
+                               self.current_build.db_id,
+                               self.platform.db_id))
             self.conn.commit()
             self.db_id = Device.from_unique_identifier(self.unique_identifier).db_id
         else:
@@ -455,8 +455,8 @@ class Device(DBObject):
                                self._verification_code, self._auth_token,
                                self.user.db_id,
                                None if self.carrier is None else self.carrier.db_id,
-                               None if self.build is None else self.build.db_id,
-                               None if self.platform is None else self.platform.db_id,
+                               self.current_build.db_id,
+                               self.platform.db_id,
                                self.db_id))
             self.conn.commit()
 
@@ -714,12 +714,24 @@ class Carrier(DBObject):
         return self._from_db_row(self.curs.fetchone())
 
     @classmethod
-    def from_identifier(self, identifier):
-        if identifier is None:
-            return self.from_identifier('none')
+    def from_string(self, string):
+        if string is None:
+            return None
+        space = string.find(' ')
+        if space == -1:
+            filtered = string.lower()
+        else:
+            filtered = string[:space].lower()
+        filtered = filter(lambda c: c.isalpha(), filtered)
         self.curs.execute("""SELECT * FROM carriers
-                             WHERE identifier = %s""", (identifier,))
-        return self._from_db_row(self.curs.fetchone())
+                             WHERE identifier = %s""", (filtered,))
+        carrier = self._from_db_row(self.curs.fetchone())
+        if carrier is None:
+            carrier = Carrier()
+            carrier.identifier = filtered
+            carrier.name = string
+            carrier.save()
+        return carrier
 
     def __init__(self):
         self.db_id = -1
@@ -743,7 +755,12 @@ class Carrier(DBObject):
     identifier = property(get_identifier, set_identifier)
 
     def save(self):
-        pass
+        self.curs.execute("""INSERT INTO carriers (name, identifier)
+                             VALUES(%s, %s)""",
+                          (self.name, self.identifier))
+        self.conn.commit()
+        self.db_id = Carrier.from_string(self.identifier).db_id
+
 
 
 class Update(DBObject):
@@ -970,7 +987,7 @@ def register(form, *args, **kw):
     user = User.from_email(email)
     device = Device.from_unique_identifier(device_id)
     platform = Platform.from_identifier(form.getvalue('platform'))
-    carrier = Carrier.from_identifier(form.getvalue('carrier'))
+    carrier = Carrier.from_string(form.getvalue('carrier'))
     os_info = form.getvalue('OSInfo')
     model = form.getvalue('model')
     build_number = form.getvalue('buildNumber')
@@ -980,9 +997,6 @@ def register(form, *args, **kw):
     build = Build.from_build_number_and_platform(build_number, platform)
     if build is None:
         error('Invalid build number')
-        return
-    if carrier is None:
-        error('Invalid carrier')
         return
     if user is None:
         results['newUser'] = True
@@ -1017,7 +1031,7 @@ def register(form, *args, **kw):
         device.carrier = carrier
         device.os_info = os_info
         device.model = model
-        device.build = build
+        device.current_build = build
         device.save()
         if not results['newUser']:
             base_url = 'http://mobile.csse.rose-hulman.edu/beta/actions.cgi?'
