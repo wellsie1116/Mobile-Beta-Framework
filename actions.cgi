@@ -866,17 +866,36 @@ class Feedback(DBObject):
 
     @classmethod
     def _from_db_row(self, row):
-        return None
+        if row is None:
+            return None
+        feedback = Feedback()
+        feedback.db_id = row[0]
+        feedback.device = row[1]
+        feedback.build = row[2]
+        feedback.time = row[3]
+        feedback.content = row[4]
+        return feedback
     
     @classmethod
     def from_id(self, db_id):
-        return None
+        self.curs.execute("""SELECT * FROM feedback WHERE id = %s""",
+                          (db_id,))
+        return self._from_db_row(self.curs.fetchone())
+
+    def __init__(self):
+        self.device = None
+        self.build = None
+        self.time = datetime.datetime.now()
+        self.content = None
 
     def get_device(self):
         return self._device
 
     def set_device(self, device):
-        self._device = device
+        if type(device) == types.LongType:
+            self._device = Device.from_id(device)
+        else:
+            self._device = device
 
     device = property(get_device, set_device)
 
@@ -884,7 +903,10 @@ class Feedback(DBObject):
         return self._build
 
     def set_build(self, build):
-        self._build = build
+        if type(build) == types.LongType:
+            self._build = Build.from_id(build)
+        else:
+            self._build = build
 
     build = property(get_build, set_build)
 
@@ -905,7 +927,10 @@ class Feedback(DBObject):
     content = property(get_content, set_content)
     
     def save(self):
-        pass
+        self.curs.execute("""INSERT INTO feedback (device, build, time, content)
+                             VALUES (%s, %s, %s, %s)""",
+                          (self.device.db_id, self.build.db_id, self.time, self.content))
+        self.conn.commit()
 
 
 def sum_string(string):
@@ -954,12 +979,9 @@ def error(*args):
     print json.dumps({'success': False, 'errors': args})
 
 
-def success(vals={}, auth=False):
+def success(vals={}):
     print 'Content-Type: text/plain\n'
-    if auth:
-        print json.dumps(dict(vals.items() + {'success': True, 'authSuccess': True}.items()))
-    else:
-        print json.dumps(dict(vals.items() + {'success': True}.items()))
+    print json.dumps(dict(vals.items() + {'success': True}.items()))
 
 
 def html(content):
@@ -1151,11 +1173,19 @@ def submit_feedback(form, *args, **kw):
     if 'authToken' not in form:
         error('Auth Token is required')
         return
+    if 'content' not in form:
+        error('Content is required')
+        return
     device = Device.from_auth_token(form.getvalue('authToken'))
     if device is None:
         error('Authentication failed')
         return
-    error('Not implemented')
+    feedback = Feedback()
+    feedback.device = device
+    feedback.build = device.current_build
+    feedback.content = form.getvalue('content')
+    feedback.save()
+    success()
 
 
 def submit_test_results(form, *args, **kw):
