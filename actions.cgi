@@ -248,6 +248,15 @@ class Device(DBObject):
                        candidates)
         return None if len(match) < 1 else match[0]
 
+    @classmethod
+    def from_auth_token(self, token):
+        summed = sum_string(token)
+        self.curs.execute("""SELECT * FROM devices WHERE auth_token LIKE %s""",
+                          (str(summed) + '::%',))
+        candidates = [self._from_db_row(row) for row in self.curs.fetchall()]
+        match = filter(lambda d: d.is_correct_auth_token(token), 
+                       candidates)
+        return None if len(match) < 1 else match[0]
 
     @classmethod
     def from_verification_code(self, code):
@@ -928,9 +937,12 @@ def error(*args):
     print json.dumps({'success': False, 'errors': args})
 
 
-def success(vals={}):
+def success(vals={}, auth=False):
     print 'Content-Type: text/plain\n'
-    print json.dumps(dict(vals.items() + {'success': True}.items()))
+    if auth:
+        print json.dumps(dict(vals.items() + {'success': True, 'authSuccess': True}.items()))
+    else:
+        print json.dumps(dict(vals.items() + {'success': True}.items()))
 
 
 def html(content):
@@ -1121,15 +1133,22 @@ def send_email(to_addr, reply_addr, subject, msg):
     server.quit()  
 
 
-def submit_feedback(*args, **kw):
-    error('Submit Feedback not implemented')
+def submit_feedback(form, *args, **kw):
+    if 'authToken' not in form:
+        error('Auth Token is required')
+        return
+    device = Device.from_auth_token(form.getvalue('authToken'))
+    if device is None:
+        error('Authentication failed')
+        return
+    error('Not implemented')
 
 
-def submit_test_results(*args, **kw):
+def submit_test_results(form, *args, **kw):
     error('Submit Test Results not implemented')
 
 
-def notify_of_update(*args, **kw):
+def notify_of_update(form, *args, **kw):
     error('Notify of Update not implemented')
 
 
@@ -1141,7 +1160,7 @@ def get_latest_builds(form, *args, **kw):
     if platform is None:
         error('Invalid platform')
         return
-    latest, official = Build.latest(platform)
+    official, latest = Build.latest(platform)
     result = {}
     if latest is None:
         result['latest'] = None
