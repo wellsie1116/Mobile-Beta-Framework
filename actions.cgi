@@ -26,6 +26,8 @@ cgitb.enable()
 class DBObject(object):
     conn = None
     curs = None
+    username = None
+    password = None
 
     def get_id(self):
         return self._id
@@ -1214,9 +1216,6 @@ def change_user_name(form, *args, **kw):
         return
 
 def send_email(to_addr, reply_addr, subject, msg):
-    username = 'rhitmobile@gmail.com'  
-    password = 'zu7hewuxan4phideemootaiphohSh4oe'  
-
     msg = ('From: RHIT Mobile Beta <rhitmobile@gmail.com>\r\n'
             'To: %s\r\n'
             'Reply-To: %s\r\n'
@@ -1224,7 +1223,7 @@ def send_email(to_addr, reply_addr, subject, msg):
 
     server = smtplib.SMTP('smtp.gmail.com:587')  
     server.starttls()  
-    server.login(username, password)  
+    server.login(self.username, self.password)  
     try:
         server.sendmail('RHIT Mobile Beta Program', (to_addr,), msg)  
     except Exception:
@@ -1395,12 +1394,18 @@ def run_script():
     db_password = config.get('Database', 'password')
     db_database = config.get('Database', 'db')
 
+    email_username = config.get('Gmail', 'username')
+    email_password = config.get('Gmail', 'password')
+
     conn = MySQLdb.connect(host=db_host,
                            user=db_user,
                            passwd=db_password,
                            db=db_database)
     DBObject.conn = conn
     DBObject.curs = conn.cursor()
+    DBObject.username = email_username
+    DBObject.password = email_password
+
     parse_and_execute(form=cgi.FieldStorage())
     conn.close()
 

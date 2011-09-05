@@ -6,3 +6,7 @@ host=myhost
 user=myuser
 password=mypassword
 db=mydb
+
+[Gmail]
+username=mygmailaddress@gmail.com
+password=mypassword
