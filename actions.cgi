@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import smtplib
+import time
 import types
 import urllib
 import uuid
@@ -1036,6 +1037,10 @@ def parse_and_execute(form, **kw):
         actions[form.getvalue('action')](form=form, **kw)
 
 
+def init_db(conn, curs):
+    """Initialize database tables"""
+    pass
+
 def error(*args):
     print 'Content-Type: text/plain\n'
     print json.dumps({'success': False, 'errors': args})
@@ -1064,6 +1069,7 @@ def register(form, *args, **kw):
     if len(errors) > 0:
         error(*errors)
         return
+    testing = form.getvalue('test') is not None
     results = {}
     email = form.getvalue('email')
     name = form.getvalue('name')
@@ -1082,10 +1088,13 @@ def register(form, *args, **kw):
     if build is None:
         error('Invalid build number')
         return
-    if user is None:
+    if user is None or testing:
         results['newUser'] = True
         user = User(new=True)
-        user.email = email
+        if testing:
+            user.email = uuid.uuid4()
+        else:
+            user.email = email
         user.name = name
         user.save()
         base_url = 'http://mobile.csse.rose-hulman.edu/beta/actions.cgi?'
@@ -1098,12 +1107,12 @@ def register(form, *args, **kw):
         msg = ('Thank you for registering for the RHIT Mobile Beta program! '
                 'Please verify your email and devices by clicking this link:'
                 '\n\n%s\n\nThanks!\nThe RHIT Mobile Team') % verify_url
-        send_email(email, platform.owner_email, 'Verify your email and devices', msg) 
+        send_email(email, platform.owner_email, 'Verify your email and devices', msg, testing) 
         name_msg = ('A new user has registered for your platform\'s beta '
                     'program:\n\nName: %s\nEmail: %s\n\nTo change this user\'s '
                     'name, use the following link:\n\n%s\n\nLet me know if '
                     'something breaks\nJimmy') % (user.name, user.email, name_change_url)
-        send_email(platform.owner_email, 'theisje@rose-hulman.edu', 'New user %s registered' % user.email, name_msg)
+        send_email(platform.owner_email, 'theisje@rose-hulman.edu', 'New user %s registered' % user.email, name_msg, testing)
     else:
         results['newUser'] = False
     if device is None:
@@ -1126,7 +1135,7 @@ def register(form, *args, **kw):
                    'Beta Program! Please verify this new device by clicking the '
                    'link below.\n\nDevice: %s (%s)\n\n%s\n\nThanks!\nThe '
                    'RHIT Mobile Team') % (device.model, device.os_info, deviceUrl)
-            send_email(email, platform.owner_email, 'Verify your new device', msg)
+            send_email(email, platform.owner_email, 'Verify your new device', msg, testing)
         results['authToken'] = device.auth_token
     else:
         results['newDevice'] = False
@@ -1215,7 +1224,10 @@ def change_user_name(form, *args, **kw):
         html('<h1>Name Changed Successfully</h1>')
         return
 
-def send_email(to_addr, reply_addr, subject, msg):
+def send_email(to_addr, reply_addr, subject, msg, test=False):
+    if test:
+        time.sleep(0.5)
+        return
     msg = ('From: RHIT Mobile Beta <rhitmobile@gmail.com>\r\n'
             'To: %s\r\n'
             'Reply-To: %s\r\n'
@@ -1223,7 +1235,7 @@ def send_email(to_addr, reply_addr, subject, msg):
 
     server = smtplib.SMTP('smtp.gmail.com:587')  
     server.starttls()  
-    server.login(self.username, self.password)  
+    server.login(DBObject.username, DBObject.password)  
     try:
         server.sendmail('RHIT Mobile Beta Program', (to_addr,), msg)  
     except Exception:
@@ -1406,6 +1418,7 @@ def run_script():
     DBObject.username = email_username
     DBObject.password = email_password
 
+    init_db(conn, conn.cursor())
     parse_and_execute(form=cgi.FieldStorage())
     conn.close()
 
