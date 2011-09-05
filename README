@@ -1,0 +1,8 @@
+You'll also need a config.cfg in the same directory as the cgi script
+(use symlinks to keep this out of your cgi-bin). It should look like this:
+
+[Database]
+host=myhost
+user=myuser
+password=mypassword
+db=mydb
