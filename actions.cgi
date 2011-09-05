@@ -4,10 +4,12 @@
 actions.cgi: interactions for the RHIT Mobile beta program
 """
 
-import datetime
 import cgi
+import ConfigParser
+import datetime
 import hashlib
 import json
+import os
 import smtplib
 import types
 import urllib
@@ -1383,10 +1385,20 @@ def renew_publish_link(form, *args, **kw):
 
 
 def run_script():
-    conn = MySQLdb.connect(host='localhost',
-                           user='beta',
-                           passwd='urQiHZOk4WBZFCO6HUzld7EZB7P7BAQA',
-                           db='beta_testers')
+    config = ConfigParser.ConfigParser()
+    config_dir = os.path.dirname(os.path.realpath(__file__))
+    config_path = os.path.join(config_dir, 'config.cfg')
+    config.read(config_path)
+
+    db_host = config.get('Database', 'host')
+    db_user = config.get('Database', 'user')
+    db_password = config.get('Database', 'password')
+    db_database = config.get('Database', 'db')
+
+    conn = MySQLdb.connect(host=db_host,
+                           user=db_user,
+                           passwd=db_password,
+                           db=db_database)
     DBObject.conn = conn
     DBObject.curs = conn.cursor()
     parse_and_execute(form=cgi.FieldStorage())
