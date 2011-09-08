@@ -240,6 +240,7 @@ class Platform(Base):
         session.delete(self)
         session.commit()
 
+
 class Build(Base):
     __tablename__ = 'builds'
 
@@ -280,6 +281,7 @@ class Build(Base):
     def destroy(self):
         session.delete(self)
         session.commit()
+
 
 class Carrier(Base):
     __tablename__ = 'carriers'
@@ -372,7 +374,9 @@ class Feedback(Base):
         session.delete(self)
         session.commit()
 
+
 Base.metadata.create_all(engine)
+
 
 class RequestHandler(object):
 
