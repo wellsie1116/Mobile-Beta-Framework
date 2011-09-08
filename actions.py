@@ -22,12 +22,17 @@ from sqlalchemy import Column, ForeignKey, String, Integer, DateTime, Boolean, T
 from sqlalchemy.orm import sessionmaker, relationship, backref
 from sqlalchemy.ext.declarative import declarative_base
 
+from urlparse import parse_qs
+
 ####### DEBUG #######
 import cgitb
 cgitb.enable()
 #####################
 
 def initDatabase():
+
+    global config
+
     config = ConfigParser.ConfigParser()
     config_dir = os.path.dirname(os.path.realpath(__file__))
     config_path = os.path.join(config_dir, 'config.cfg')
@@ -779,4 +784,37 @@ def run_script():
 
     print handler.parse_and_execute(form=cgi.FieldStorage())
 
-if __name__ == '__main__': run_script()
+#if __name__ == '__main__': run_script()
+
+class QueryStringArgs:
+    def __init__(self, args):
+        self.args = parse_qs(args)
+    def getvalue(self, key):
+        if key not in self.args:
+            return None
+        return self.args[key][0]
+    def __contains__(self, key):
+        return key in self.args
+
+def application(environ, start_response):
+    status = '200 OK'
+    handler = RequestHandler()
+    
+    email_username = config.get('Gmail', 'username')
+    email_password = config.get('Gmail', 'password')
+    base_url = config.get('Site', 'scriptURL')
+
+    handler.email_username = email_username
+    handler.email_password = email_password
+    handler.base_url = base_url
+
+    args = QueryStringArgs(environ['QUERY_STRING'])
+
+    output = handler.parse_and_execute(form=args)
+
+    response_headers = [('Content-type', 'text/plain'),
+                        ('Content-Length', str(len(output)))]
+    start_response(status, response_headers)
+
+    return [output]
+
