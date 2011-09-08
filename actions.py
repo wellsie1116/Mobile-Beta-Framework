@@ -449,10 +449,12 @@ class RequestHandler(object):
 
         if user is None:
             results['newUser'] = True
-            user = User()
 
+            user = User()
             user.name = name
+            user.email = email
             user.save()
+
             base_url = 'http://mobile.csse.rose-hulman.edu/beta/actions.cgi?'
             verify_args = {'action': 'verifyUser',
                            'verificationCode': user.verification_code}
@@ -497,7 +499,7 @@ class RequestHandler(object):
         else:
             results['newDevice'] = False
 
-            if device.user.email != email:
+            if device.owner.email != email:
                 return self.error('Device already registered to another user')
 
             device.auth_token = str(uuid.uuid4())
@@ -505,7 +507,7 @@ class RequestHandler(object):
             device.carrier = carrier
             device.os_info = os_info
             device.model = model
-            device.build = build
+            device.current_build = build
             device.save()
             results['authToken'] = device.auth_token
 
