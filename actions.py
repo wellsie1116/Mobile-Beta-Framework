@@ -12,6 +12,7 @@ import json
 import os
 import smtplib
 import time
+import threading
 import types
 import urllib
 import uuid
@@ -465,12 +466,12 @@ class RequestHandler(object):
             msg = ('Thank you for registering for the RHIT Mobile Beta program! '
                     'Please verify your email and devices by clicking this link:'
                     '\n\n%s\n\nThanks!\nThe RHIT Mobile Team') % verify_url
-            self.sendEmail(email, platform.owner_email, 'Verify your email and devices', msg) 
+            self.sendEmail(email, platform.owner_email, 'Verify your email and devices', msg, self.email_username, self.email_password) 
             name_msg = ('A new user has registered for your platform\'s beta '
                         'program:\n\nName: %s\nEmail: %s\n\nTo change this user\'s '
                         'name, use the following link:\n\n%s\n\nLet me know if '
                         'something breaks\nJimmy') % (user.name, user.email, name_change_url)
-            self.sendEmail(platform.owner_email, 'theisje@rose-hulman.edu', 'New user %s registered' % user.email, name_msg)
+            self.sendEmail(platform.owner_email, 'theisje@rose-hulman.edu', 'New user %s registered' % user.email, name_msg, self.email_username, self.email_password)
         else:
             results['newUser'] = False
 
@@ -585,20 +586,25 @@ class RequestHandler(object):
             user.save()
             return self.html('<h1>Name Changed Successfully</h1>')
     
-    def sendEmail(self, to_addr, reply_addr, subject, msg):
-        msg = ('From: RHIT Mobile Beta <rhitmobile@gmail.com>\r\n'
-                'To: %s\r\n'
-                'Reply-To: %s\r\n'
-                'Subject: %s\r\n\r\n%s') % (to_addr, reply_addr, subject, msg)
+    def sendEmail(self, to_addr, reply_addr, subject, msg, username, password):
+        class EmailSender(threading.Thread):
+
+            def run():
+                msg = ('From: RHIT Mobile Beta <rhitmobile@gmail.com>\r\n'
+                       'To: %s\r\n'
+                       'Reply-To: %s\r\n'
+                       'Subject: %s\r\n\r\n%s') % (to_addr, reply_addr, subject, msg)
     
-        server = smtplib.SMTP('smtp.gmail.com:587')  
-        server.starttls()  
-        server.login(self.email_username, self.email_password)  
-        try:
-            server.sendmail('RHIT Mobile Beta Program', (to_addr,), msg)  
-        except Exception:
-            pass # JUST EAT IT
-        server.quit()  
+                server = smtplib.SMTP('smtp.gmail.com:587')  
+                server.starttls()  
+                server.login(username, password)  
+                try:
+                    server.sendmail('RHIT Mobile Beta Program', (self.to_addr,), self.msg)  
+                except Exception:
+                    pass # JUST EAT IT
+                server.quit()  
+
+        EmailSender().start()
     
     
     def submitFeedback(form, *args, **kw):
