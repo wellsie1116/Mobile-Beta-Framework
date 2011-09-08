@@ -229,7 +229,7 @@ class Platform(Base):
 
     @classmethod
     def from_identifier(self, identifier):
-        pass
+        return session.query(Platform).filter(Platform.identifier == identifier.strip().lower()).first()
 
     def save(self):
         if self not in session:
@@ -267,7 +267,7 @@ class Build(Base):
 
     @classmethod
     def from_number_and_platform(self, number, platform):
-        pass
+        return session.query(Build).filter(Build.build_number == number).first()
 
     @classmethod
     def latest_for_platform(self, platform):
@@ -396,7 +396,7 @@ class RequestHandler(object):
         elif form.getvalue('action') not in actions:
             return self.error('Invalid action: %s' % form.getvalue('action'))
         else:
-            actions[form.getvalue('action')](form=form)
+            return actions[form.getvalue('action')](form=form)
     
     def error(self, *args):
         return 'Content-Type: text/plain\n\n' + json.dumps({'success': False, 'errors': args})
@@ -409,7 +409,7 @@ class RequestHandler(object):
                 '<!DOCTYPE html><html><head></head><body>%s</body></html>' % content)
     
     
-    def register(form, *args, **kw):
+    def register(self, form):
         errors = []
 
         if 'email' not in form:
@@ -427,7 +427,6 @@ class RequestHandler(object):
         if len(errors) > 0:
             return self.error(*errors)
 
-        testing = form.getvalue('test') is not None
         results = {}
         email = form.getvalue('email')
         name = form.getvalue('name')
@@ -443,19 +442,14 @@ class RequestHandler(object):
         if platform is None:
             return self.error('Invalid platform')
 
-        build = Build.from_build_number_and_platform(build_number, platform)
+        build = Build.from_number_and_platform(build_number, platform)
 
         if build is None:
             return self.error('Invalid build number')
 
-        if user is None or testing:
+        if user is None:
             results['newUser'] = True
-            user = User(new=True)
-
-            if testing:
-                user.email = uuid.uuid4()
-            else:
-                user.email = email
+            user = User()
 
             user.name = name
             user.save()
@@ -469,23 +463,23 @@ class RequestHandler(object):
             msg = ('Thank you for registering for the RHIT Mobile Beta program! '
                     'Please verify your email and devices by clicking this link:'
                     '\n\n%s\n\nThanks!\nThe RHIT Mobile Team') % verify_url
-            send_email(email, platform.owner_email, 'Verify your email and devices', msg, testing) 
+            self.sendEmail(email, platform.owner_email, 'Verify your email and devices', msg) 
             name_msg = ('A new user has registered for your platform\'s beta '
                         'program:\n\nName: %s\nEmail: %s\n\nTo change this user\'s '
                         'name, use the following link:\n\n%s\n\nLet me know if '
                         'something breaks\nJimmy') % (user.name, user.email, name_change_url)
-            send_email(platform.owner_email, 'theisje@rose-hulman.edu', 'New user %s registered' % user.email, name_msg, testing)
+            self.sendEmail(platform.owner_email, 'theisje@rose-hulman.edu', 'New user %s registered' % user.email, name_msg)
         else:
             results['newUser'] = False
 
         if device is None:
             results['newDevice'] = True
-            device = Device(new=True)
+            device = Device()
             device.unique_identifier = device_id
-            device.user = user
+            device.owner = user
             device.platform = platform
             device.carrier = carrier
-            device.os_info = os_info
+            device.operating_system = os_info
             device.model = model
             device.current_build = build
             device.save()
@@ -597,7 +591,7 @@ class RequestHandler(object):
     
         server = smtplib.SMTP('smtp.gmail.com:587')  
         server.starttls()  
-        server.login(DBObject.username, DBObject.password)  
+        server.login(self.email_username, self.email_password)  
         try:
             server.sendmail('RHIT Mobile Beta Program', (to_addr,), msg)  
         except Exception:
@@ -725,7 +719,7 @@ class RequestHandler(object):
                   '<input type="text" name="downloadURL"/><br/>'
                   '<input type="submit"/></form>') % (platform.name, publish_key))
         else:
-            build = Build(new=True)
+            build = Build()
             build.platform = platform
             build.number = form.getvalue('buildNumber')
             build.official = form.getvalue('official') in ('on', 'true')
