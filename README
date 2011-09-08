@@ -10,3 +10,14 @@ password=mygmailpassword
 
 [Site]
 scriptURL=http://path/to/actions.py
+
+
+==WSGI==
+
+Make sure mod_wsgi is installed and loaded by Apache.
+
+In your VirtualHost definition, define a script alias to the actions.py script:
+
+WSGIScriptAlias /mobile/ /path/to/repository/actions.py
+
+
