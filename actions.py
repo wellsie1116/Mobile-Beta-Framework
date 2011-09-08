@@ -16,7 +16,6 @@ import types
 import urllib
 import uuid
 
-import MySQLdb
 import sqlalchemy
 from sqlalchemy import Column, ForeignKey, String, Integer, DateTime, Boolean, Text, Sequence, Enum
 from sqlalchemy.orm import sessionmaker, relationship, backref
