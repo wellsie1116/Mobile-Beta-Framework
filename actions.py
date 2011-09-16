@@ -801,7 +801,6 @@ class QueryStringArgs:
         return key in self.args
 
 def application(environ, start_response):
-    status = '200 OK'
     handler = RequestHandler()
     
     email_username = config.get('Gmail', 'username')
@@ -815,6 +814,7 @@ def application(environ, start_response):
     args = QueryStringArgs(environ['QUERY_STRING'])
 
     try:
+        status = '200 OK'
         output = handler.parse_and_execute(form=args)
         response_headers = [('Content-type', 'text/plain'),
                             ('Content-Length', str(len(output)))]
