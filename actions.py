@@ -4,6 +4,7 @@
 actions.py: interactions for the RHIT Mobile beta program
 """
 
+import sys
 import cgi
 import ConfigParser
 import datetime
@@ -383,6 +384,10 @@ class Feedback(Base):
 
 Base.metadata.create_all(engine)
 
+class RequestException(Exception):
+    def __init__(self, *args):
+        self.json = json.dumps({'success': False, 'errors': args})
+
 
 class RequestHandler(object):
 
@@ -405,14 +410,13 @@ class RequestHandler(object):
             return actions[form.getvalue('action')](form=form)
     
     def error(self, *args):
-        return 'Content-Type: text/plain\n\n' + json.dumps({'success': False, 'errors': args})
+        raise RequestException(*args)
     
     def success(self, vals={}):
-        return 'Content-Type: text/plain\n\n' + json.dumps(dict(vals.items() + {'success': True}.items()))
+        return json.dumps(dict(vals.items() + {'success': True}.items()))
     
     def html(self, content):
-        return ('Content-Type: text/html\n\n'
-                '<!DOCTYPE html><html><head></head><body>%s</body></html>' % content)
+        return ('<!DOCTYPE html><html><head></head><body>%s</body></html>' % content)
     
     
     def register(self, form):
@@ -810,11 +814,21 @@ def application(environ, start_response):
 
     args = QueryStringArgs(environ['QUERY_STRING'])
 
-    output = handler.parse_and_execute(form=args)
+    try:
+        output = handler.parse_and_execute(form=args)
+        response_headers = [('Content-type', 'text/plain'),
+                            ('Content-Length', str(len(output)))]
+        start_response(status, response_headers)
+        return [output]
+    except RequestException as ex:
+        status = "400 Bad Request"
+        response_headers = [("content-type", "text/plain")]
+        start_response(status, response_headers, sys.exc_info())
+        return [ex.json]
+    except:
+        status = "500 Internal Server Error"
+        response_headers = [("content-type", "text/plain")]
+        start_response(status, response_headers, sys.exc_info())
+        return [json.dumps({'success': False, 'errors': 'Internal Server Error'})]
 
-    response_headers = [('Content-type', 'text/plain'),
-                        ('Content-Length', str(len(output)))]
-    start_response(status, response_headers)
-
-    return [output]
 
