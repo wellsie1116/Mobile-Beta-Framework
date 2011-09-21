@@ -797,8 +797,7 @@ def application(environ, start_response):
         return [ex.json]
     except:
         status = "500 Internal Server Error"
-        response_headers = [("content-type", "json")]
-        print sys.exc_info()
+        response_headers = [("content-type", "text/plain")]
         start_response(status, response_headers, sys.exc_info())
         return [json.dumps({'success': False, 'errors': 'Internal Server Error'})]
 
