@@ -232,7 +232,7 @@ class Platform(Base):
 
     @classmethod
     def from_publishing_key(self, key):
-        pass
+        return session.query(Platform).filter(Platform.publishing_key == key.strip().lower()).first()
 
     @classmethod
     def from_identifier(self, identifier):
@@ -274,11 +274,15 @@ class Build(Base):
 
     @classmethod
     def from_number_and_platform(self, number, platform):
-        return session.query(Build).filter(Build.build_number == number).first()
+        return session.query(Build).filter(Build.build_number == number and Build.platform_id == platform.id).first()
 
     @classmethod
     def latest_for_platform(self, platform):
-        pass
+        official = session.query(Build).filter(Build.platform_id == platform.id and Build.classification == 'official').first()
+        beta = session.query(Build).filter(Build.platform_id == platform.id and Build.classification == 'beta').first()
+        nightly = session.query(Build).filter(Build.platform_id == platform.id and Build.classification == 'nightly').first()
+        rolling = session.query(Build).filter(Build.platform_id == platform.id and Build.classification == 'rolling').first()
+        return rolling, nightly, beta, official
 
     def save(self):
         if self not in session:
@@ -641,24 +645,19 @@ class RequestHandler(object):
     def notifyOfUpdate(self, form):
         if 'authToken' not in form:
             return self.error('Auth Token is required')
-
         if 'toBuildNumber' not in form:
             return self.error('Destination Build is required')
-
         device = Device.from_auth_token(form.getvalue('authToken'))
-
         if device is None:
             return self.error('Authentication failed')
-
-        to_build = Build.from_build_number_and_platform(form.getvalue('toBuildNumber'), device.platform)
-
+        to_build = Build.from_number_and_platform(form.getvalue('toBuildNumber'), device.platform)
         if to_build is None:
             return self.error('Invalid destination build number')
-
         update = Update()
         update.device = device
         update.to_build = to_build
         device.current_build = to_build
+        update.time = datetime.datetime.now()
         update.save()
         device.save()
         return self.success()
@@ -667,37 +666,31 @@ class RequestHandler(object):
     def getLatestBuilds(self, form):
         if 'platform' not in form:
             return self.error('Platform is required')
-
         platform = Platform.from_identifier(form.getvalue('platform'))
-
         if platform is None:
             return self.error('Invalid platform')
-
-        rolling, nightly, beta, official = Build.latest(platform)
-
+        rolling, nightly, beta, official = Build.latest_for_platform(platform)
         result = {}
         if rolling is None:
             result['rolling'] = None
         else:
-            result['rolling'] = {'buildNumber': rolling.number,
+            result['rolling'] = {'buildNumber': rolling.build_number,
                                 'viewURL': rolling.view_url,
                                 'downloadURL': rolling.download_url}
         if official is None:
             result['official'] = None
         else:
-            result['official'] = {'buildNumber': official.number,
+            result['official'] = {'buildNumber': official.build_number,
                                   'viewURL': official.view_url,
                                   'downloadURL': official.download_url}
         return self.success(result)
 
 
     def publishBuild(self, form):
-        if 'publisinghKey' not in form:
+        if 'publishingKey' not in form:
             return self.html('Publishing Key required')
-
         publish_key = form.getvalue('publishingKey')
         platform = Platform.from_publishing_key(publish_key)
-
         if platform is None:
             return self.html('Bad publishing key')
         if 'buildNumber' not in form:
@@ -714,37 +707,34 @@ class RequestHandler(object):
                   '<label for="downloadURL">Download URL</label><br/>'
                   '<input type="text" name="downloadURL"/><br/>'
                   '<input type="submit"/></form>') % (platform.name, publish_key))
-        else:
-            build = Build()
-            build.platform = platform
-            build.number = form.getvalue('buildNumber')
-            build.official = form.getvalue('official') in ('on', 'true')
-            build.view_url = form.getvalue('viewURL')
-            build.download_url = form.getvalue('downloadURL')
-            build.save()
-            return self.html('<h1>Build Published</h1>')
+        build = Build()
+        build.build_number = form.getvalue('buildNumber')
+        build.platform = platform
+        classification = form.getvalue('classification')
+        if not classification: classification = 'official'
+        build.classification = classification
+        build.view_url = form.getvalue('viewURL')
+        build.download_url = form.getvalue('downloadURL')
+        build.save()
+        return self.html('<h1>Build Published</h1>')
 
 
     def renewPublishingKey(self, form):
         if 'platform' not in form:
             return self.html('<h1>Renewal Failed</h1>Platform required')
-
         platform = Platform.from_identifier(form.getvalue('platform'))
-
         if platform is None:
             return self.html('<h1>Renewal Failed</h1>Invalid platform')
-
         platform.publishing_key = str(uuid.uuid4())
         platform.save()
-
         publish_args = {'action': 'publishBuild',
-                        'publishKey': platform.publish_key}
+                        'publishKey': platform.publishing_key}
         publish_url = self.base_url + urllib.urlencode(publish_args)
         msg = ('The publishing key for %s has been renewed. Use the link below to '
                'publish builds for %s from now on.\n\nPublishing Key: %s\n\n%s\n\n'
-               'Thanks\nJimmy') % (platform.name, platform.name, platform.publish_key,
+               'Thanks\nJimmy') % (platform.name, platform.name, platform.publishing_key,
                                    publish_url)
-        self.send_email(platform.owner_email, 'theisje@rose-hulman.edu', 'Publishing Key Renewed', msg)
+        self.sendEmail(platform.owner_email, 'theisje@rose-hulman.edu', 'Publishing Key Renewed', msg, self.email_username, self.email_password)
         return self.html('<h1>Publishing Key Renewed</h1>')
 
 
@@ -808,11 +798,11 @@ def application(environ, start_response):
     except:
         status = "500 Internal Server Error"
         response_headers = [("content-type", "html")]
-#        print sys.exc_info()
+        print sys.exc_info()
         start_response(status, response_headers, sys.exc_info())
         return [json.dumps({'success': False, 'errors': 'Internal Server Error'})]
 
 
 if __name__ == '__main__':
     from paste import httpserver
-    httpserver.serve(application, host="192.168.1.33", port='8080')
+    httpserver.serve(application, host="localhost", port='8080')
