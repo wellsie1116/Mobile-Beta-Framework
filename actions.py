@@ -785,19 +785,19 @@ def application(environ, start_response):
     try:
         status = '200 OK'
         output = handler.parse_and_execute(form=args)
-        response_headers = [('Content-type', 'html'),
+        response_headers = [('Content-type', 'text/html'),
                             ('Content-Length', str(len(output)))]
         start_response(status, response_headers)
         print output
         return [output]
     except RequestException as ex:
         status = "400 Bad Request"
-        response_headers = [("content-type", "html")]
+        response_headers = [("content-type", "text/plain")]
         start_response(status, response_headers, sys.exc_info())
         return [ex.json]
     except:
         status = "500 Internal Server Error"
-        response_headers = [("content-type", "html")]
+        response_headers = [("content-type", "json")]
         print sys.exc_info()
         start_response(status, response_headers, sys.exc_info())
         return [json.dumps({'success': False, 'errors': 'Internal Server Error'})]
