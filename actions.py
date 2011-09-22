@@ -38,7 +38,7 @@ def initDatabase():
     config_dir = os.path.dirname(os.path.realpath(__file__))
     config_path = os.path.join(config_dir, 'config.cfg')
     config.read(config_path)
-    
+
     db_connection = config.get('Database', 'connection')
 
     global Base
@@ -232,7 +232,7 @@ class Platform(Base):
 
     @classmethod
     def from_publishing_key(self, key):
-        pass
+        return session.query(Platform).filter(Platform.publishing_key == key.strip().lower()).first()
 
     @classmethod
     def from_identifier(self, identifier):
@@ -274,11 +274,15 @@ class Build(Base):
 
     @classmethod
     def from_number_and_platform(self, number, platform):
-        return session.query(Build).filter(Build.build_number == number).first()
+        return session.query(Build).filter(Build.build_number == number and Build.platform_id == platform.id).first()
 
     @classmethod
     def latest_for_platform(self, platform):
-        pass
+        official = session.query(Build).filter(Build.platform_id == platform.id and Build.classification == 'official').first()
+        beta = session.query(Build).filter(Build.platform_id == platform.id and Build.classification == 'beta').first()
+        nightly = session.query(Build).filter(Build.platform_id == platform.id and Build.classification == 'nightly').first()
+        rolling = session.query(Build).filter(Build.platform_id == platform.id and Build.classification == 'rolling').first()
+        return rolling, nightly, beta, official
 
     def save(self):
         if self not in session:
@@ -408,17 +412,17 @@ class RequestHandler(object):
             return self.error('Invalid action: %s' % form.getvalue('action'))
         else:
             return actions[form.getvalue('action')](form=form)
-    
+
     def error(self, *args):
         raise RequestException(*args)
-    
+
     def success(self, vals={}):
         return json.dumps(dict(vals.items() + {'success': True}.items()))
-    
+
     def html(self, content):
         return ('<!DOCTYPE html><html><head></head><body>%s</body></html>' % content)
-    
-    
+
+
     def register(self, form):
         errors = []
 
@@ -475,7 +479,7 @@ class RequestHandler(object):
             msg = ('Thank you for registering for the RHIT Mobile Beta program! '
                     'Please verify your email and devices by clicking this link:'
                     '\n\n%s\n\nThanks!\nThe RHIT Mobile Team') % verify_url
-            self.sendEmail(email, platform.owner_email, 'Verify your email and devices', msg, self.email_username, self.email_password) 
+            self.sendEmail(email, platform.owner_email, 'Verify your email and devices', msg, self.email_username, self.email_password)
             name_msg = ('A new user has registered for your platform\'s beta '
                         'program:\n\nName: %s\nEmail: %s\n\nTo change this user\'s '
                         'name, use the following link:\n\n%s\n\nLet me know if '
@@ -522,64 +526,51 @@ class RequestHandler(object):
             results['authToken'] = device.auth_token
 
         return self.success(results)
-    
-    
-    def verifyUser(form, *args, **kw):
-        errors = []
+
+
+    def verifyUser(self, form):
         if 'verificationCode' not in form:
-            html('<h1>Verification Failed</h1>Verification code is required')
+            return self.html('<h1>Verification Failed</h1>Verification code is required')
         ver_code = form.getvalue('verificationCode')
         user = User.from_verification_code(ver_code)
         if user is None:
-            html('<h1>Verification Failed</h1>Invalid verification code')
-        elif user.verified:
-            html('<h1>Account already verified</h1>')
-        else:
-            user.verified = True
-            user.save()
-            devices = 'Devices also verified:<ul>'
-            for device in user.devices:
-                if not device.verified:
-                    device.verified = True
-                    devices += '<li>%s (%s)</li>' % (device.model, device.os_info)
-                    device.save()
-            devices += '</ul>'
-            html('<h1>Account Verified</h1>' + devices)
-    
-    
-    def verifyDevice(form, *args, **kw):
-        errors = []
+            return self.html('<h1>Verification Failed</h1>Invalid verification code')
+        if user.verified:
+            return self.html('<h1>Account already verified</h1>')
+        user.verified = True
+        user.save()
+        devices = 'Devices also verified:<ul>'
+        for device in user.devices:
+            if not device.verified:
+                device.verified = True
+                devices += '<li>%s (%s)</li>' % (device.model, device.operating_system)
+                device.save()
+        devices += '</ul>'
+        return self.html('<h1>Account Verified</h1>' + devices)
+
+
+    def verifyDevice(self, form):
         if 'verificationCode' not in form:
-            html('<h1>Verification Failed</h1>Verification code is required')
-            return
+            return self.html('<h1>Verification Failed</h1>Verification code is required')
         ver_code = form.getvalue('verificationCode')
         device = Device.from_verification_code(ver_code)
         if device is None:
-            html('<h1>Verification Failed</h1>Invalid verification code')
-            return
-        elif device.verified:
-            html('<h1>Device Already Verified</h1>')
-            return
-        else:
-            device.verified = True
-            device.save()
-            html('<h1>Device Verified</h1>')
-    
-    
+            return self.html('<h1>Verification Failed</h1>Invalid verification code')
+        if device.verified:
+            return self.html('<h1>Device Already Verified</h1>')
+        device.verified = True
+        device.save()
+        return self.html('<h1>Device Verified</h1>')
+
+
     def changeUserName(self, form):
-        errors = []
         if 'nameChangeCode' not in form:
             return self.html('<h1>Name Change Failed</h1>Name change code required')
-
         code = form.getvalue('nameChangeCode')
         name = form.getvalue('name')
         user = User.from_name_change_code(code)
-
         if user is None:
             return self.html('<h1>Name Change Failed</h1>Invalid name change code')
-
-        email = user.email
-
         if name is None:
             return self.html("""<h1>Change User's Name</h1>
                     <form action="/beta/actions.cgi" method="post">
@@ -590,11 +581,10 @@ class RequestHandler(object):
                     <input type="hidden" name="nameChangeCode" value="%s"/>
                     <input type="hidden" name="action" value="changeUserName"/>
                     <input type="submit"/></form>""" % (user.email, user.name if user.name is not None else '', code))
-        else:
-            user.name = name
-            user.save()
-            return self.html('<h1>Name Changed Successfully</h1>')
-    
+        user.name = name
+        user.save()
+        return self.html('<h1>Name Changed Successfully</h1>')
+
     def sendEmail(self, to_addr, reply_addr, subject, msg, username, password):
         class EmailSender(threading.Thread):
 
@@ -603,122 +593,104 @@ class RequestHandler(object):
                        'To: %s\r\n'
                        'Reply-To: %s\r\n'
                        'Subject: %s\r\n\r\n%s') % (to_addr, reply_addr, subject, msg)
-    
-                server = smtplib.SMTP('smtp.gmail.com:587')  
-                server.starttls()  
-                server.login(username, password)  
+
+                server = smtplib.SMTP('smtp.gmail.com:587')
+                server.starttls()
+                server.login(username, password)
                 try:
-                    server.sendmail('RHIT Mobile Beta Program', (self.to_addr,), self.msg)  
+                    server.sendmail('RHIT Mobile Beta Program', (self.to_addr,), self.msg)
                 except Exception:
                     pass # JUST EAT IT
-                server.quit()  
+                server.quit()
 
         EmailSender().start()
-    
-    
-    def submitFeedback(form, *args, **kw):
+
+
+    def submitFeedback(self, form):
         if 'authToken' not in form:
             return self.error('Auth Token is required')
-
         if 'content' not in form:
             return self.error('Content is required')
-
         device = Device.from_auth_token(form.getvalue('authToken'))
-
         if device is None:
             return self.error('Authentication failed')
-
         feedback = Feedback()
-        feedback.device = device
         feedback.build = device.current_build
+        feedback.device = device
         feedback.content = form.getvalue('content')
+        feedback.time = datetime.datetime.now()
         feedback.save()
         return self.success()
-    
-    
+
+
     def submitTestResults(self, form):
         if 'authToken' not in form:
             return self.error('Auth Token is required')
-
         if 'passed' not in form:
             return self.error('Pass Status is required')
-
         device = Device.from_auth_token(form.getvalue('authToken'))
-
         if device is None:
             return self.error('Authentication failed')
-
         passed = form.getvalue('passed').lower() == 'true'
-
         test = TestExecution()
-        test.device = device
         test.build = device.current_build
+        test.device = device
         test.content = form.getvalue('content')
         test.passed = passed
+        test.time = datetime.datetime.now()
         test.save()
         return self.success()
-    
-    
+
+
     def notifyOfUpdate(self, form):
         if 'authToken' not in form:
             return self.error('Auth Token is required')
-
         if 'toBuildNumber' not in form:
             return self.error('Destination Build is required')
-
         device = Device.from_auth_token(form.getvalue('authToken'))
-
         if device is None:
             return self.error('Authentication failed')
-
-        to_build = Build.from_build_number_and_platform(form.getvalue('toBuildNumber'), device.platform)
-
+        to_build = Build.from_number_and_platform(form.getvalue('toBuildNumber'), device.platform)
         if to_build is None:
             return self.error('Invalid destination build number')
-
         update = Update()
         update.device = device
         update.to_build = to_build
         device.current_build = to_build
+        update.time = datetime.datetime.now()
         update.save()
         device.save()
         return self.success()
-    
-    
+
+
     def getLatestBuilds(self, form):
         if 'platform' not in form:
             return self.error('Platform is required')
-
         platform = Platform.from_identifier(form.getvalue('platform'))
-
         if platform is None:
             return self.error('Invalid platform')
-
-        rolling, nightly, beta, official = Build.latest(platform)
-
+        rolling, nightly, beta, official = Build.latest_for_platform(platform)
         result = {}
         if rolling is None:
             result['rolling'] = None
         else:
-            result['rolling'] = {'buildNumber': rolling.number,
+            result['rolling'] = {'buildNumber': rolling.build_number,
                                 'viewURL': rolling.view_url,
                                 'downloadURL': rolling.download_url}
         if official is None:
             result['official'] = None
         else:
-            result['official'] = {'buildNumber': official.number,
+            result['official'] = {'buildNumber': official.build_number,
                                   'viewURL': official.view_url,
                                   'downloadURL': official.download_url}
         return self.success(result)
-    
-    
-    def publishBuild(self, form):
-        if 'publisinghKey' not in form:
-            return self.html('Publishing Key required')
 
+
+    def publishBuild(self, form):
+        if 'publishingKey' not in form:
+            return self.html('Publishing Key required')
         publish_key = form.getvalue('publishingKey')
         platform = Platform.from_publishing_key(publish_key)
-
         if platform is None:
             return self.html('Bad publishing key')
         if 'buildNumber' not in form:
@@ -735,37 +707,34 @@ class RequestHandler(object):
                   '<label for="downloadURL">Download URL</label><br/>'
                   '<input type="text" name="downloadURL"/><br/>'
                   '<input type="submit"/></form>') % (platform.name, publish_key))
-        else:
-            build = Build()
-            build.platform = platform
-            build.number = form.getvalue('buildNumber')
-            build.official = form.getvalue('official') in ('on', 'true')
-            build.view_url = form.getvalue('viewURL')
-            build.download_url = form.getvalue('downloadURL')
-            build.save()
-            return self.html('<h1>Build Published</h1>')
-    
-    
+        build = Build()
+        build.build_number = form.getvalue('buildNumber')
+        build.platform = platform
+        classification = form.getvalue('classification')
+        if not classification: classification = 'official'
+        build.classification = classification
+        build.view_url = form.getvalue('viewURL')
+        build.download_url = form.getvalue('downloadURL')
+        build.save()
+        return self.html('<h1>Build Published</h1>')
+
+
     def renewPublishingKey(self, form):
         if 'platform' not in form:
             return self.html('<h1>Renewal Failed</h1>Platform required')
-
         platform = Platform.from_identifier(form.getvalue('platform'))
-
         if platform is None:
             return self.html('<h1>Renewal Failed</h1>Invalid platform')
-
         platform.publishing_key = str(uuid.uuid4())
         platform.save()
-
         publish_args = {'action': 'publishBuild',
-                        'publishKey': platform.publish_key}
+                        'publishKey': platform.publishing_key}
         publish_url = self.base_url + urllib.urlencode(publish_args)
         msg = ('The publishing key for %s has been renewed. Use the link below to '
                'publish builds for %s from now on.\n\nPublishing Key: %s\n\n%s\n\n'
-               'Thanks\nJimmy') % (platform.name, platform.name, platform.publish_key,
+               'Thanks\nJimmy') % (platform.name, platform.name, platform.publishing_key,
                                    publish_url)
-        self.send_email(platform.owner_email, 'theisje@rose-hulman.edu', 'Publishing Key Renewed', msg)
+        self.sendEmail(platform.owner_email, 'theisje@rose-hulman.edu', 'Publishing Key Renewed', msg, self.email_username, self.email_password)
         return self.html('<h1>Publishing Key Renewed</h1>')
 
 
@@ -802,7 +771,7 @@ class QueryStringArgs:
 
 def application(environ, start_response):
     handler = RequestHandler()
-    
+
     email_username = config.get('Gmail', 'username')
     email_password = config.get('Gmail', 'password')
     base_url = config.get('Site', 'scriptURL')
@@ -816,9 +785,10 @@ def application(environ, start_response):
     try:
         status = '200 OK'
         output = handler.parse_and_execute(form=args)
-        response_headers = [('Content-type', 'text/plain'),
+        response_headers = [('Content-type', 'text/html'),
                             ('Content-Length', str(len(output)))]
         start_response(status, response_headers)
+        print output
         return [output]
     except RequestException as ex:
         status = "400 Bad Request"
@@ -832,3 +802,6 @@ def application(environ, start_response):
         return [json.dumps({'success': False, 'errors': 'Internal Server Error'})]
 
 
+if __name__ == '__main__':
+    from paste import httpserver
+    httpserver.serve(application, host="localhost", port='8080')
