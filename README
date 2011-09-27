@@ -20,4 +20,13 @@ In your VirtualHost definition, define a script alias to the actions.py script:
 
 WSGIScriptAlias /mobile/ /path/to/repository/actions.py
 
+If using a daemon process, include the path to the python script in the python-path.  See the example below for an example
+
+
+===Example configuration===
+
+WSGIDaemonProcess main user=http group=http processes=1 threads=1 home=/home/kevin/repos/mobile_beta/ python-path=/home/kevin/repos/mobile_beta/
+WSGIScriptAlias /mobile/ /home/kevin/repos/mobile_beta/actions.py
+
+WSGIProcessGroup main
 
