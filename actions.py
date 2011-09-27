@@ -53,7 +53,27 @@ def initDatabase():
     Session.configure(bind=engine)
     session = Session()
 
+def loadPlugins():
+    global plugins
+    plugins = []
+
+    # check subfolders
+    modulePath = os.path.abspath(os.path.dirname(__file__))
+    pluginsPath = modulePath + os.sep + "plugins"
+    lst = os.listdir(pluginsPath)
+    pluginDirectories = []
+    for d in lst:
+        s = pluginsPath + os.sep + d
+        if os.path.isdir(s) and os.path.exists(s + os.sep + "__init__.py"):
+            pluginDirectories.append(d)
+
+    # load the modules
+    for d in pluginDirectories:
+        plugin = __import__("plugins." + d, fromlist = ["*"])
+        plugins.append(plugin)
+
 initDatabase()
+loadPlugins()
 
 """
 Various helper functions
@@ -408,10 +428,17 @@ class RequestHandler(object):
                    'renewPublishingKey': self.renewPublishingKey}
         if 'action' not in form:
             return self.error('You must specify an action')
-        elif form.getvalue('action') not in actions:
-            return self.error('Invalid action: %s' % form.getvalue('action'))
-        else:
-            return actions[form.getvalue('action')](form=form)
+
+        action = form.getvalue('action')
+
+        for plugin in plugins:
+            if action in plugin.ACTION_FILTER:
+                return plugin.performAction(action, form)
+
+        if action not in actions:
+            return self.error('Invalid action: %s' % (action))
+
+        return actions[action](form=form)
 
     def error(self, *args):
         raise RequestException(*args)
