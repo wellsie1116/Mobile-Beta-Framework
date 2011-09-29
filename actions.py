@@ -333,6 +333,10 @@ class Update(Base):
     to_build = relationship('Build')
     time = Column(DateTime, nullable=False)
 
+    @classmethod
+    def from_device_id(self, device_id):
+        return session.query(Update).filter(Update.device_id == device_id).all()
+
     def save(self):
         if self not in session:
             session.add(self)
@@ -341,6 +345,7 @@ class Update(Base):
     def destroy(self):
         session.delete(self)
         session.commit()
+
 
 
 class TestExecution(Base):
@@ -354,6 +359,10 @@ class TestExecution(Base):
     time = Column(DateTime, nullable=False)
     content = Column(Text(length=10240))
     passed = Column(Boolean, nullable=False)
+
+    @classmethod
+    def from_device_id(self, device_id):
+        return session.query(TestExecution).filter(TestExecution.device_id == device_id).all()
 
     def save(self):
         if self not in session:
@@ -375,6 +384,10 @@ class Feedback(Base):
     build = relationship('Build', backref='feedback')
     time = Column(DateTime, nullable=False)
     content = Column(Text(length=10240), nullable=False)
+
+    @classmethod
+    def from_device_id(self, device_id):
+        return session.query(Feedback).filter(TestExecution.device_id == device_id).all()
 
     def save(self):
         if self not in session:
@@ -405,7 +418,8 @@ class RequestHandler(object):
                    'notifyOfUpdate': self.notifyOfUpdate,
                    'getLatestBuilds': self.getLatestBuilds,
                    'publishBuild': self.publishBuild,
-                   'renewPublishingKey': self.renewPublishingKey}
+                   'renewPublishingKey': self.renewPublishingKey,
+                   'removeDevice': self.removeDevice}
         if 'action' not in form:
             return self.error('You must specify an action')
         elif form.getvalue('action') not in actions:
@@ -622,6 +636,20 @@ class RequestHandler(object):
         feedback.save()
         return self.success()
 
+    def removeDevice(self, form):
+        if 'authToken' not in form:
+            return self.error('Auth Token is required')
+        device = Device.from_auth_token(form.getvalue('authToken'))
+        if device is None:
+            return self.error('Authentication failed')
+        for i in Update.from_device_id(device.id):
+            i.destroy()
+        for i in Feedback.from_device_id(device.id):
+            i.destroy()
+        for i in TestExecution.from_device_id(device.id):
+            i.destroy()
+        device.destroy()
+        return self.success()
 
     def submitTestResults(self, form):
         if 'authToken' not in form:
@@ -640,7 +668,6 @@ class RequestHandler(object):
         test.time = datetime.datetime.now()
         test.save()
         return self.success()
-
 
     def notifyOfUpdate(self, form):
         if 'authToken' not in form:
@@ -661,7 +688,6 @@ class RequestHandler(object):
         update.save()
         device.save()
         return self.success()
-
 
     def getLatestBuilds(self, form):
         if 'platform' not in form:
